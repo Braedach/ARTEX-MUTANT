@@ -1,18 +1,24 @@
-// 渠道字段表与配置值的解析工具。
+// Channel field table and config-value parsing utilities.
 //
-// 与页面拆开是因为这一份是**数据**而不是视图：它描述每种渠道有哪些字段、
-// 各自该用什么控件，以及表单文本到配置值（JSON）的双向转换。
-// 单独放一个文件后，新增渠道只需要动这里，页面本身不必改。
+// Split out from the page because this is **data**, not a view: it describes
+// which fields each channel has, which control each should use, and the
+// two-way conversion between form text and the config value (JSON). With it
+// in its own file, adding a new channel only touches this file, not the page
+// itself.
 //
-// 本文件是纯数据模块（非 client component），不能调用 useTranslations。
-// 所以文案不写死在这里，而是存 i18n 键（notifyPage 命名空间），由渲染它们的
-// 组件（page.tsx / channel-form.tsx）用 t() 解析——键是 ASCII，上游中文原文
-// 保留在 messages/zh.json。渠道类型展示名改走 notifyPage.kind.<kind>。
+// This is a pure data module (not a client component), so it can't call
+// useTranslations. Display text is therefore stored as i18n keys
+// (the notifyPage namespace) and resolved with t() by whichever component
+// renders them (page.tsx / channel-form.tsx) - the keys are ASCII, and their
+// English text lives in messages/en.json. The channel type's display name
+// goes through notifyPage.kind.<kind>.
 
-// 各渠道的配置字段定义。
+// Config field definitions for each channel.
 //
-// 这里刻意保留一份前端字段表，而不是让后端下发 schema：后端只负责
-// Validate（必填/格式），UI 需要的是布局与控件类型，两者关注的不是同一件事。
+// Deliberately keeps a frontend field table here rather than having the
+// backend hand down a schema: the backend is only responsible for
+// validation (required/format), while the UI needs layout and control type -
+// two different concerns.
 // 唯一的耦合点是 secret_keys —— 哪些字段该渲染成密码框由后端给出，
 // 因为只有渠道实现自己清楚哪些值算凭据（企业微信的整个 Webhook 就是凭据，
 // 而钉钉的只是其中一个 secret）。新增渠道时这里少一个条目只会让表单变空白，

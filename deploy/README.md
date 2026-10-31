@@ -66,7 +66,7 @@ cd deploy
 ```
 
 Builds `linux/amd64` only (this is a Docker deployment, not a native-binary
-distribution). Pushes `ghcr.io/braedach/artex:<tag>` and `:latest`, and
+distribution). Pushes `ghcr.io/braedach/artex-mutant:<tag>` and `:latest`, and
 creates a matching GitHub Release (zip + `SHA256SUMS`) on this repo. (Fork
 this further yourself? Change `GHCR_NAMESPACE`/`GH_REPO_SLUG` near the top
 of `publish.sh` to your own.)

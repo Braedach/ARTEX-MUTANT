@@ -95,9 +95,9 @@ GHCR_TOKEN_FILE="${STATE_ROOT}/.ghcr-token"   # chmod 600, gitignored
 
 GHCR_NAMESPACE="braedach"
 GHCR_REGISTRY="ghcr.io"
-GHCR_REPO="artex"           # ghcr.io/braedach/artex — matches the repo name,
+GHCR_REPO="artex-mutant"   # ghcr.io/braedach/artex-mutant — matches the repo name,
                              # so GitHub links the package to it automatically.
-GH_REPO_SLUG="Braedach/ARTEX"
+GH_REPO_SLUG="Braedach/ARTEX-MUTANT"
 
 # ---- colour helpers -----------------------------------------------------
 COL_RESET='\033[0m'; COL_BLUE='\033[0;34m'; COL_GREEN='\033[0;32m'

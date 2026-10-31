@@ -7,7 +7,7 @@
 #   Purpose:
 #     Docker DEVELOPMENT / SANDBOX deployment (claude). Runs this fork from
 #     the image deploy/publish.sh builds and pushes. Only ever pulls
-#     ghcr.io/braedach/artex — never builds anything itself. The same
+#     ghcr.io/braedach/artex-mutant — never builds anything itself. The same
 #     services, image and env wiring as deploy/stack-podman.yml (production,
 #     baden) — deliberately, so what is tested here is what runs there. See
 #     deploy/README.md for the full picture, including what was and wasn't
@@ -43,7 +43,7 @@
 #       on first `up` if absent, but create them ahead of time instead of
 #       letting Docker improvise it:
 #         mkdir -p /srv/artex/{postgres,data,jellyfin/config,jellyfin/cache}
-#     - ghcr.io/braedach/artex set to Public in GitHub's package settings
+#     - ghcr.io/braedach/artex-mutant set to Public in GitHub's package settings
 #       (defaults private on first push — see publish.sh)
 #     - whatever reverse proxy / dashboard labelling convention you use,
 #       wired up separately — not done by this file
@@ -125,7 +125,7 @@ services:
       - artex-net
 
   artex:
-    image: ghcr.io/braedach/artex:${ARTEX_TAG:-latest}
+    image: ghcr.io/braedach/artex-mutant:${ARTEX_TAG:-latest}
     container_name: artex
     hostname: artex
     restart: always
