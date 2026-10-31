@@ -7,7 +7,7 @@ name: detections
 # 머지 게이트로 실제로 뒷받침하는 워크플로다. Go 빌드·정적 분석·테스트는 ci.yml 이 맡는다.
 # 여덟 테스트에 더해, 규칙이 아닌 세 게이트도 같은 머지 게이트에서 돈다: 하네스 레지스트리
 # 동기 검사, 호스트 분류 도구(detections/triage/artex_host_triage.py)의 자가 테스트, 그리고
-# 방어 가이드(docs/defense-{ko,en}.md) 안에 산문으로 들어 있는 인라인 Sigma 상관 템플릿의
+# 방어 가이드(docs/defense.md) 안에 산문으로 들어 있는 인라인 Sigma 상관 템플릿의
 # 정합 검사다. 셋 다 여덟 규칙 테스트와 별개이고 run-all.sh 가 똑같이 돌린다. 세 번째 게이트는
 # 그 템플릿이 방어 가이드에 단언한 사실(`sigma check` 통과·splunk/eql/loki 변환·lucene/kusto
 # 상관 미지원·ko/en 규칙 본문 동일)을 재현해, 상류 sigma-cli·백엔드가 올라가 산문이 조용히
@@ -35,10 +35,9 @@ on:
       - "db/schema.sql"
       - "cmd/artex/main.go"
       - "traffic/traffic.go"
-      # 세 번째 게이트(방어 템플릿 정합 검사)가 읽는 두 파일. 이 템플릿이 바뀌면
-      # 재검증해야 하므로 트리거에 넣는다.
-      - "docs/defense-ko.md"
-      - "docs/defense-en.md"
+      # The third gate (defense-template consistency check) reads this file. If
+      # the template changes, it needs re-verifying, so it's in the trigger.
+      - "docs/defense.md"
       - ".github/workflows/detections.yml"
   pull_request:
     paths:
@@ -51,8 +50,7 @@ on:
       - "db/schema.sql"
       - "cmd/artex/main.go"
       - "traffic/traffic.go"
-      - "docs/defense-ko.md"
-      - "docs/defense-en.md"
+      - "docs/defense.md"
       - ".github/workflows/detections.yml"
 
 permissions:
