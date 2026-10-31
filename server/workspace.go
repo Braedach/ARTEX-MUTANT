@@ -41,6 +41,15 @@ const (
 // wsResolve maps a user-supplied relative path to an absolute path INSIDE the work
 // dir. It returns ok=false if the path would escape the root. filepath.Clean on a
 // rooted copy collapses any ".." so nothing can climb above the root.
+//
+// ARTEX-MUTANT hardening (G-07): the lexical Clean above only neutralises a
+// traversal spelled out in the request string (".."). It does nothing about a
+// symlink that already exists under the work dir — a tool call with shell
+// access (which this agent legitimately has) can plant one
+// (ln -s /app/jwt.key workspace/x) and then read/write/download it straight
+// through this same API, landing outside the work dir despite every path
+// string here staying lexically inside it. withinRealRoot resolves the
+// deepest existing ancestor's real path and re-checks it against the root.
 func (s *Server) wsResolve(rel string) (string, bool) {
 	base := filepath.Clean(s.m.dir)
 	rel = strings.TrimPrefix(strings.TrimSpace(rel), "/")
@@ -49,7 +58,37 @@ func (s *Server) wsResolve(rel string) (string, bool) {
 	if abs != base && !strings.HasPrefix(abs, base+string(os.PathSeparator)) {
 		return "", false
 	}
+	if !withinRealRoot(base, abs) {
+		return "", false
+	}
 	return abs, true
+}
+
+// withinRealRoot reports whether abs's real (symlink-resolved) location is base
+// or inside it. abs itself, or any suffix of it, may not exist yet (a write or
+// mkdir target) — it walks up to the deepest existing ancestor and resolves
+// that, which is the earliest point a planted symlink could actually divert
+// the path, so checking it is sufficient regardless of how much of the rest
+// is still to be created.
+func withinRealRoot(base, abs string) bool {
+	realBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		realBase = base // base is expected to exist; fall back to the lexical form
+	}
+	realBase = filepath.Clean(realBase)
+	p := abs
+	for {
+		real, err := filepath.EvalSymlinks(p)
+		if err == nil {
+			real = filepath.Clean(real)
+			return real == realBase || strings.HasPrefix(real, realBase+string(os.PathSeparator))
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return false // walked up to the filesystem root and found nothing that exists
+		}
+		p = parent
+	}
 }
 
 // wsRel renders an absolute path back as a workspace-relative path (forward slashes).
