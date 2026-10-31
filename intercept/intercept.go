@@ -555,19 +555,53 @@ func (i *Interceptor) Match(toolName string, input []byte) (Decision, bool) {
 }
 
 func ruleMatches(r compiledRule, toolName string, input []byte) bool {
-	var subject string
-	switch r.MatchTarget {
-	case "tool_name":
-		subject = toolName
-	case "tool_input":
-		subject = string(input)
-	default:
+	if r.MatchTarget == "tool_name" {
+		if r.MatchType == "regex" {
+			return r.re != nil && r.re.MatchString(toolName)
+		}
+		return strings.Contains(toolName, r.Pattern)
+	}
+	if r.MatchTarget != "tool_input" {
 		return false
 	}
-	if r.MatchType == "regex" {
-		return r.re != nil && r.re.MatchString(subject)
+	// ARTEX-MUTANT hardening (G-03): matching only the raw JSON bytes lets a
+	// JSON string-escape (e.g. "read" for "read") sail straight past a
+	// rule looking for the literal word - the escape sequence, not the
+	// decoded character, is what's in those bytes. decodedToolInput
+	// round-trips input through json.Unmarshal/Marshal, which resolves \uXXXX
+	// escapes into their real characters, so try both forms: raw first (the
+	// common, cheap case), then decoded only if raw didn't match and the
+	// input actually parses as JSON.
+	for _, subject := range []string{string(input), decodedToolInput(input)} {
+		if subject == "" {
+			continue
+		}
+		if r.MatchType == "regex" {
+			if r.re != nil && r.re.MatchString(subject) {
+				return true
+			}
+			continue
+		}
+		if strings.Contains(subject, r.Pattern) {
+			return true
+		}
 	}
-	return strings.Contains(subject, r.Pattern)
+	return false
+}
+
+// decodedToolInput returns input's JSON string values with escapes resolved
+// (e.g. e -> e), or "" if input doesn't parse as JSON (then callers fall
+// back to the raw-bytes match only, same as before this existed).
+func decodedToolInput(input []byte) string {
+	var v any
+	if err := json.Unmarshal(input, &v); err != nil {
+		return ""
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(out)
 }
 
 func defaultMessage(action, name string) string {
