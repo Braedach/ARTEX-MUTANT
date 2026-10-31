@@ -1,10 +1,8 @@
 # `/btw` 검증 기록
 
-한국어 · [中文](VALIDATION.zh.md)
 
 날짜: 2026-09-10. 브랜치: `codex/btw-side-question`. 기준 커밋(baseline): `8dae851b9b622f2ff2631f332fde9719d0b16fba`.
 
-> 이 문서는 원본 중국어 문서(`VALIDATION.zh.md`)를 한국어로 옮긴 것입니다. 상류(upstream) 저장소의 변경을 대조하기 쉽도록 원본은 그대로 보존합니다.
 
 독립된 PostgreSQL 테스트 DB 와 데이터 디렉터리를 사용했습니다. 실제 모델 자격 증명은 독립 테스트 환경에만 주입했고 코드나 이 기록에는 쓰지 않았으며, 제품 기본 모델도 바꾸지 않았습니다. Go 1.26.3, norma v0.3.6, Next.js 16.2.9.
 

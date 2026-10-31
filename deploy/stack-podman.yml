@@ -7,7 +7,7 @@
 #     Podman PRODUCTION deployment (baden), via Dockhand. The dev/sandbox
 #     deployment on claude is deploy/stack-docker.yml — same services, same
 #     image, same env wiring, deliberately, so what's tested there is what
-#     runs here. Only ever pulls ghcr.io/braedach/artex — never builds
+#     runs here. Only ever pulls ghcr.io/braedach/artex-mutant — never builds
 #     anything itself. See deploy/README.md for the full build -> test ->
 #     release flow.
 #
@@ -36,7 +36,7 @@
 #         mkdir -p /srv/artex/{postgres,data}
 #       The ":U" flags are kept in this file anyway for anyone who runs it
 #       directly with `podman compose` outside Dockhand, where they do work.
-#     - ghcr.io/braedach/artex set to Public in GitHub's package settings
+#     - ghcr.io/braedach/artex-mutant set to Public in GitHub's package settings
 #       (defaults private on first push — see publish.sh)
 #     - whatever reverse proxy / dashboard labelling convention you use,
 #       wired up separately — not done by this file
@@ -111,7 +111,7 @@ services:
       - artex-net
 
   artex:
-    image: ghcr.io/braedach/artex:${ARTEX_TAG:?ARTEX_TAG must be set to an exact published tag - never :latest in production}
+    image: ghcr.io/braedach/artex-mutant:${ARTEX_TAG:?ARTEX_TAG must be set to an exact published tag - never :latest in production}
     container_name: artex
     hostname: artex
     restart: always
