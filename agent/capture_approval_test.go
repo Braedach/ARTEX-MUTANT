@@ -36,7 +36,13 @@ func TestCaptureApprovalLifecycle(t *testing.T) {
 	if err := ic.SetEnabledTools([]string{"ApprovalAuditProbe"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ic.SetJudgeConfig(intercept.JudgeConfig{Enabled: true, AskTimeoutSeconds: 1, AskTimeoutAction: "allow"}); err != nil {
+	// FailAction is pinned explicitly (not left to the package default) so this
+	// test's "model_fallback" case keeps exercising the allow-on-fallback
+	// lifecycle path regardless of what defaultJudgeFailAction is set to -
+	// ARTEX-MUTANT changed that default to "deny" (see intercept/intercept.go),
+	// and this test's "invalid action -> allow" row is testing the FailAction
+	// mechanism itself, not asserting what the right security default is.
+	if err := ic.SetJudgeConfig(intercept.JudgeConfig{Enabled: true, AskTimeoutSeconds: 1, AskTimeoutAction: "allow", FailAction: "allow"}); err != nil {
 		t.Fatal(err)
 	}
 
