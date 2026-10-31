@@ -327,9 +327,19 @@ const (
 )
 
 // Judge default values.
+//
+// defaultJudgeFailAction is "deny", not "allow" (changed in ARTEX-MUTANT, see
+// Design-Reference's ARTEX functional security review and the reArtex analysis
+// it references): once an operator has enabled the judge, a model error or an
+// unparseable reply should fail CLOSED by default, matching
+// defaultJudgeAskTimeoutAction below. "Judge not configured at all" is a
+// separate, pre-existing case (Judge returns judged=false and the caller keeps
+// its own allow fallback) and is unchanged here — flipping that too would be a
+// much bigger behavioural change (nothing unmatched would run without a judge
+// configured) that deserves its own review, not a silent default flip.
 const (
 	defaultJudgeTimeoutSecs      = 15
-	defaultJudgeFailAction       = "allow"
+	defaultJudgeFailAction       = "deny"
 	defaultJudgeAskTimeoutSecs   = 300
 	defaultJudgeAskTimeoutAction = "deny"
 )
