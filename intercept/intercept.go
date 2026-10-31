@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -145,6 +146,31 @@ type Interceptor struct {
 	enabledTools map[string]bool // nil means not loaded yet
 	pending      *pendingManager
 	reviewer     Reviewer // nil = LLM fallback judge not wired
+
+	// lastLoadFailureLog rate-limits logLoadFailureLocked (ARTEX-MUTANT
+	// hardening). Guarded by mu, which loadLocked's callers always hold
+	// (write-locked) before calling it.
+	lastLoadFailureLog time.Time
+}
+
+// loadFailureLogInterval bounds how often logLoadFailureLocked actually
+// writes a log line while loadLocked keeps failing - every guarded tool call
+// retries it while i.cached is nil, which would otherwise flood the log for
+// the whole length of a DB outage.
+const loadFailureLogInterval = 10 * time.Second
+
+// logLoadFailureLocked makes an otherwise-silent intercept-rule load failure
+// observable: every caller of loadLocked discards its error, so without this
+// an operator has no way to see that intercept scrutiny is currently being
+// skipped for every tool call (see loadLocked's own comment on why). Caller
+// must hold i.mu (write-locked).
+func (i *Interceptor) logLoadFailureLocked(err error) {
+	now := time.Now()
+	if now.Sub(i.lastLoadFailureLog) < loadFailureLogInterval {
+		return
+	}
+	i.lastLoadFailureLog = now
+	log.Printf("[intercept] 규칙/도구 목록을 불러오지 못해 모든 도구 호출이 가로채기 심사를 건너뛰고 있습니다(DB 가 복구되면 자동으로 재시도): %v", err)
 }
 
 // SetReviewer installs the LLM fallback judge callback. Passing nil disables it.
@@ -181,6 +207,18 @@ func (i *Interceptor) Invalidate() {
 func (i *Interceptor) loadLocked() error {
 	rules, err := i.db.ListInterceptRules()
 	if err != nil {
+		// ARTEX-MUTANT hardening (G-04, visibility only - see this type's own
+		// comment on enabledTools for why the failure mode itself isn't
+		// changed here): this is the single point where a DB hiccup fails
+		// BOTH rules() and IsToolEnabled() silently (the latter because
+		// i.enabledTools is only ever populated below this early return, so
+		// it stays nil and every tool reads as "not enabled" -> every tool
+		// call skips intercept scrutiny entirely until the DB recovers).
+		// Every caller discards this error, so without a log here the
+		// condition is invisible. Rate-limited to avoid flooding logs
+		// during a sustained outage, since every guarded tool call retries
+		// this while i.cached is nil.
+		i.logLoadFailureLocked(err)
 		return err
 	}
 	var out []compiledRule
