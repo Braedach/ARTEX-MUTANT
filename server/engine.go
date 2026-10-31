@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
@@ -506,6 +507,19 @@ func transitionIntentState(store *db.ExplorationStore, intentID int64, expected,
 	return nil
 }
 
+// maxSteerMsgRunes and maxSteerQueueLen bound a single steer_work call
+// (ARTEX-MUTANT hardening, G-09): nothing capped either dimension before,
+// so a planner loop that keeps calling steer_work — a malfunctioning model,
+// or a hostile one if the target ever got to influence its own course
+// corrections — could grow one message or the queue without limit. These
+// are generous for a genuine course-correction (a sentence or two) while
+// still bounding worst-case memory: a human steering from the UI, or a
+// planner issuing an occasional correction, never comes close to either.
+const (
+	maxSteerMsgRunes = 2000
+	maxSteerQueueLen = 10
+)
+
 // SteerWork queues a mid-run course-correction for the work running intentID (the
 // planner's steer_work tool). The worker delivers it before its next tool call and
 // re-plans — no kill. Errors if no work is currently running that intent.
@@ -516,6 +530,9 @@ func (e *Engine) SteerWork(intentID int64, msg string) error {
 	if strings.TrimSpace(msg) == "" {
 		return fmt.Errorf("纠偏消息不能为空")
 	}
+	if n := utf8.RuneCountInString(msg); n > maxSteerMsgRunes {
+		return fmt.Errorf("纠偏消息过长（%d 字符，上限 %d）", n, maxSteerMsgRunes)
+	}
 	e.workMu.Lock()
 	running := e.work[intentID] != nil
 	e.workMu.Unlock()
@@ -523,8 +540,11 @@ func (e *Engine) SteerWork(intentID int64, msg string) error {
 		return fmt.Errorf("意图 %d 当前没有运行中的 work（可能已结束或未被领取）", intentID)
 	}
 	e.steerMu.Lock()
+	defer e.steerMu.Unlock()
+	if len(e.steerBox[intentID]) >= maxSteerQueueLen {
+		return fmt.Errorf("纠偏队列已满（上限 %d 条，先等待现有纠偏被消费）", maxSteerQueueLen)
+	}
 	e.steerBox[intentID] = append(e.steerBox[intentID], msg)
-	e.steerMu.Unlock()
 	return nil
 }
 
