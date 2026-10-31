@@ -113,6 +113,15 @@ func run() int {
 	}
 	log.Printf(config.T("[config] skill 디렉터리: %s"), skillDir)
 	srv := server.New(ctx, mgr, skillDir, *dataDir, config.BaseDir())
+	// Every one-shot env-var secret (DB DSN, LLM API keys, admin password, setup
+	// token) has now been read exactly once — NewManager above resolved the DSN,
+	// and server.New just ran agent.FromEnv and bootstrapAuth. Nothing after this
+	// point reads any of them from the environment again, so scrub them from the
+	// process's real environment block (ARTEX-MUTANT hardening — see
+	// config.ScrubSecretEnv's own comment for why this matters: an agent-driven
+	// Bash tool call, same UID as this process, can otherwise read them back out
+	// of /proc/<pid>/environ).
+	config.ScrubSecretEnv()
 	srv.WarnIfExposed(*addr)
 	httpSrv := &http.Server{
 		Addr:              *addr,
