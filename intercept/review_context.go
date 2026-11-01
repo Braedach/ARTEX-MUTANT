@@ -51,6 +51,16 @@ func WithReviewWorkingDirectory(ctx context.Context, workingDir string) context.
 	return context.WithValue(ctx, reviewContextKey{}, env)
 }
 
+// workingDirFromContext reads the same working directory BuildReviewInput
+// puts into ReviewInput.WorkingDir for the LLM judge, for Match's own
+// path-guard use (see resolvedPathForm). Every agent role (worker, chat,
+// mainagent, planner) binds this to the real directory it also passes as
+// the SDK's own WorkingDir option, so it reflects the tool's actual CWD.
+func workingDirFromContext(ctx context.Context) string {
+	env, _ := ctx.Value(reviewContextKey{}).(reviewEnvironment)
+	return env.workingDir
+}
+
 func BuildReviewInput(ctx context.Context, tool string, arguments json.RawMessage) (ReviewInput, error) {
 	if !json.Valid(arguments) {
 		return ReviewInput{}, fmt.Errorf("工具参数不是有效 JSON")
