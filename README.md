@@ -42,6 +42,16 @@ this section is the summary.
 
 All of the above are AGPL-3.0, as is this repository — see [License and disclaimer](#license-and-disclaimer).
 
+**This repository's hardening work includes reviewing forks built for stealth and detection evasion, for
+analysis only.** Understanding what those forks evade and how feeds into this repository's own defenses
+(detection content under [`detections/`](detections/), and hardening of ARTEX-MUTANT itself against being
+used that way) — but no evasion or detection-evasion capability is ported into this tool. That line is
+deliberate and does not move: a stealthier autonomous pentest agent is not a defensive feature, regardless
+of how the code that inspired the analysis was framed, and this codebase's own lineage is credibly linked
+to real unauthorized intrusions (see [Read first](#️-read-first--authorized-use-and-legal-notice) and the
+disclaimer below) — publishing something that makes that specific class of tool more effective is not a
+risk this project takes on.
+
 ---
 
 ## ⚠️ Read first — authorized use and legal notice
