@@ -105,6 +105,76 @@ type pendingManager struct {
 	ch map[int64]chan bool
 }
 
+// defaultAskTimeoutSeconds/defaultAskTimeoutAction bound an "ask" decision
+// that doesn't carry its own timeout (a DB rule saved with TimeoutEnabled
+// false). ARTEX-MUTANT hardening, informed by reArtex's analysis: HandleAsk
+// used to wait on such a decision indefinitely, so an unattended background
+// task (convID == 0, nobody watching the approvals page) could block
+// forever instead of failing closed. The LLM judge path already bounds
+// itself (Judge always sets TimeoutEnabled + AskTimeoutSeconds from
+// judgeConfig, default 300s/deny); this gives a plain DB rule's "ask" the
+// same kind of bound, reusing the judge's own default window for
+// consistency rather than introducing a second magic number.
+const (
+	defaultAskTimeoutSeconds = defaultJudgeAskTimeoutSecs
+	defaultAskTimeoutAction  = defaultJudgeAskTimeoutAction
+)
+
+// askFatigueWindow/maxAsksPerFatigueWindow bound how many times the same
+// agent may ask for approval of the exact same tool call (same tool name +
+// same input bytes) before further identical requests are auto-denied
+// without waking a human. ARTEX-MUTANT hardening, informed by reArtex's
+// analysis: without this, an agent that gets denied — or whose request
+// nobody has answered yet — can simply ask again immediately, any number of
+// times, which either floods the approvals queue or gives a reviewer more
+// chances to click through something they already said no to. Scoped to
+// the exact (agent, tool, input) triple, not just the agent or the tool
+// alone, so asking about genuinely different calls is never throttled.
+const (
+	askFatigueWindow        = 10 * time.Minute
+	maxAsksPerFatigueWindow = 5
+	fatigueGuardMaxTracked  = 1000 // bounds memory under a sustained attack
+	reasonApprovalFatigue   = "동일한 승인 요청이 반복되어 피로 방지 정책에 따라 자동 거부되었습니다"
+)
+
+// fatigueGuard implements the ask-fatigue check above. Safe for concurrent use.
+type fatigueGuard struct {
+	mu      sync.Mutex
+	entries map[string]*fatigueEntry
+}
+
+type fatigueEntry struct {
+	count     int
+	windowEnd time.Time
+}
+
+func newFatigueGuard() *fatigueGuard {
+	return &fatigueGuard{entries: map[string]*fatigueEntry{}}
+}
+
+// check increments the counter for key and reports whether this request
+// exceeds the threshold and should be auto-denied.
+func (f *fatigueGuard) check(key string) bool {
+	now := time.Now()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e, ok := f.entries[key]
+	if !ok || now.After(e.windowEnd) {
+		e = &fatigueEntry{windowEnd: now.Add(askFatigueWindow)}
+		f.entries[key] = e
+	}
+	e.count++
+	exceeded := e.count > maxAsksPerFatigueWindow
+	if len(f.entries) > fatigueGuardMaxTracked {
+		for k, v := range f.entries {
+			if now.After(v.windowEnd) {
+				delete(f.entries, k)
+			}
+		}
+	}
+	return exceeded
+}
+
 func newPendingManager() *pendingManager { return &pendingManager{ch: map[int64]chan bool{}} }
 
 func (p *pendingManager) add(id int64) chan bool {
@@ -145,6 +215,7 @@ type Interceptor struct {
 	cached       []compiledRule  // sorted by priority DESC; nil means not loaded yet
 	enabledTools map[string]bool // nil means not loaded yet
 	pending      *pendingManager
+	fatigue      *fatigueGuard
 	reviewer     Reviewer // nil = LLM fallback judge not wired
 
 	// lastLoadFailureLog rate-limits logLoadFailureLocked (ARTEX-MUTANT
@@ -191,7 +262,7 @@ var defaultEnabledTools = []string{
 // New creates an Interceptor backed by d. The rule cache is lazy-loaded on
 // first use.
 func New(d *db.DB) *Interceptor {
-	return &Interceptor{db: d, pending: newPendingManager()}
+	return &Interceptor{db: d, pending: newPendingManager(), fatigue: newFatigueGuard()}
 }
 
 // Invalidate clears the in-memory rule cache and the enabled-tools cache.
@@ -681,6 +752,19 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 	taskID, agentName := taskInfoFromCtx(ctx)
 	taskEmit := taskEmitFromCtx(ctx)
 
+	// ARTEX-MUTANT hardening (ask-fatigue guard, see fatigueGuard's own
+	// comment): check before creating a pending record at all, so a
+	// fatigue-triggered denial never shows up on the approvals queue either.
+	if agentName != "" {
+		fatigueKey := agentName + "|" + toolName + "|" + digestInput(input)
+		if i.fatigue.check(fatigueKey) {
+			denied := dec
+			denied.Message = reasonApprovalFatigue
+			i.Log(ctx, convID, denied, toolName, input, "denied")
+			return false
+		}
+	}
+
 	audit := auditFor(ctx, dec, input, "pending")
 	pendingID, err := i.db.CreateInterceptPending(ruleID, convID, taskID, agentName, toolName, input, dec.Message, audit)
 	if err != nil {
@@ -717,21 +801,16 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 		taskEmit(activity)
 	}
 
-	if !dec.TimeoutEnabled {
-		// No timeout: wait indefinitely until user decides or worker stops.
-		select {
-		case allowed := <-ch:
-			return allowed
-		case <-ctx.Done():
-			_, _ = i.db.ResolveIntercept(pendingID, "denied", "deny", reasonWorkCanceled)
-			_ = i.db.CompleteIntercept(pendingID, audit.RunID, audit.ToolUseID, "not_executed", reasonWorkCanceledPreExec, false)
-			return false
-		}
-	}
-
+	// ARTEX-MUTANT hardening (see defaultAskTimeoutSeconds/Action's own
+	// comment): a decision that doesn't carry its own timeout no longer
+	// waits indefinitely - it gets the same bounded default the judge path
+	// already uses, so an unanswered ask still fails closed rather than
+	// blocking a worker forever.
 	secs := dec.TimeoutSeconds
-	if secs <= 0 {
-		secs = 60
+	timeoutAction := dec.TimeoutAction
+	if !dec.TimeoutEnabled || secs <= 0 {
+		secs = defaultAskTimeoutSeconds
+		timeoutAction = defaultAskTimeoutAction
 	}
 	timer := time.NewTimer(time.Duration(secs) * time.Second)
 	defer timer.Stop()
@@ -739,7 +818,7 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 	case allowed := <-ch:
 		return allowed
 	case <-timer.C:
-		allowed := dec.TimeoutAction == "allow"
+		allowed := timeoutAction == "allow"
 		action := "deny"
 		if allowed {
 			action = "allow"
