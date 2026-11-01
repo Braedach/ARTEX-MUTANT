@@ -231,10 +231,11 @@ flowchart TB
   subgraph DB["PostgreSQL"]
     AGRAPH["Asset graph　assets / companies / task_scope"]
     EGRAPH["Exploration graph　exploration_nodes / anchors / activity"]
+    AUDIT["Audit chain　intercept_pending (decisions) + audit_chain_log (append-only, hash-linked)"]
   end
   subgraph SUB["Supporting subsystems"]
     PROXY["traffic-recording proxy　MITM + CA recording"]
-    GUARD["guard / intercept　tool approval gate"]
+    GUARD["guard / intercept　tool approval gate: rule match → LLM judge → ask-fatigue/timeout bounds"]
     ENR["enrich　async DNS / HTTP enrichment"]
     EXT["MCP · skills · memory · report"]
   end
@@ -251,6 +252,7 @@ flowchart TB
   GO --> DB
   WK -->|"records the full Bash / HTTP process"| PROXY
   WK --> GUARD
+  GUARD -->|"every terminal decision - allow, deny, or ask resolved - chained, not just denials"| AUDIT
   WK --> ENR
   PL -.-> EXT
   WK -.-> EXT
@@ -268,8 +270,29 @@ flowchart TB
   LLM tools.
 - **db** — stores the dual graph in PostgreSQL (pgx); the schema embedded via `go:embed` idempotently
   creates the tables on every startup.
-- **support** — the recording MITM proxy, the approval gate, async enrichment, and MCP / skills / memory
-  / report.
+- **support** — the recording MITM proxy; the approval gate (rule match, then the LLM fallback judge,
+  then a bounded ask-timeout and an ask-fatigue guard against repeated identical requests); async
+  enrichment; and MCP / skills / memory / report. See [Audit chain integrity](#audit-chain-integrity)
+  below for what the gate writes and how to check it.
+
+### Audit chain integrity
+
+Every decision the approval gate reaches — an explicit rule allow or deny, an LLM judge verdict, an
+ask resolved by a human, by timeout, or by the ask-fatigue guard, **and** the ordinary case where no
+rule matched and the judge is off or unwired — is appended to `audit_chain_log`, a separate table from
+the approval records themselves (`intercept_pending`). Each row is hashed together with the row chained
+immediately before it, and the table rejects `UPDATE`, `DELETE`, and `TRUNCATE` outright at the database
+level (a trigger, not just application code) — so an ordinary client write cannot edit or erase a
+decision, only extend the chain with a new one.
+
+This is deliberately a separate table rather than extra columns on `intercept_pending`: that table's own
+rows are legitimately deleted during task archival, and chaining over rows that are meant to disappear
+would make routine cleanup look identical to tampering.
+
+`GET /api/audit/verify` recomputes the whole chain and reports whether it still holds, or exactly which
+link first fails to — either its own content changed, or an earlier link is missing (a deletion shows up
+as the next surviving link's `prev_hash` no longer matching anything). A `200` response with `"ok": false`
+is a genuine finding: something that should be immutable was not.
 
 ### The dual graph: exploration graph + asset graph
 

@@ -1075,6 +1075,58 @@ ALTER TABLE intercept_pending ADD COLUMN IF NOT EXISTS decision_source TEXT NOT 
 UPDATE intercept_pending SET decision_source=CASE WHEN rule_id IS NOT NULL THEN 'rule'
  WHEN reason LIKE '[模型]%' THEN 'model' ELSE 'unknown' END WHERE decision_source='';
 
+-- ARTEX-MUTANT hardening (audit hash chain), informed by reArtex's analysis:
+-- every tool-call decision that reaches a terminal status (allowed/denied/
+-- timeout) is also recorded as an immutable link in audit_chain_log, hashed
+-- together with the link before it (see db/audit_chain.go). This is a
+-- SEPARATE table from intercept_pending, not extra columns on it, because
+-- intercept_pending rows are legitimately deleted in normal operation (task
+-- archival/deletion, db/task_archives_restore.go) - chaining the hash over
+-- intercept_pending's own rows would make routine archival look exactly
+-- like tampering (a row vanishing from the middle of the chain), which
+-- would either be a constant false alarm or train operators to ignore real
+-- ones. audit_chain_log instead outlives the pending row it describes:
+-- pending_id is informational (no FK, no cascade) and may point at a since-
+-- deleted/archived row: the chain itself still proves the decision happened.
+--
+-- Immutability is enforced at the database level, not just by convention:
+-- the trigger below rejects any UPDATE or DELETE on this table outright, so
+-- even a client with ordinary write access to the database cannot edit or
+-- remove a link without the attempt itself failing loudly.
+CREATE TABLE IF NOT EXISTS audit_chain_log (
+    id              BIGSERIAL PRIMARY KEY,
+    pending_id      BIGINT,
+    task_id         TEXT,
+    agent_name      TEXT NOT NULL DEFAULT '',
+    tool_name       TEXT NOT NULL,
+    input_digest    TEXT NOT NULL DEFAULT '',
+    decision_source TEXT NOT NULL DEFAULT '',
+    status          TEXT NOT NULL,
+    reason          TEXT NOT NULL DEFAULT '',
+    prev_hash       TEXT NOT NULL,
+    hash            TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_chain_log_task ON audit_chain_log(task_id, id);
+CREATE INDEX IF NOT EXISTS idx_audit_chain_log_pending ON audit_chain_log(pending_id);
+
+-- No OLD/NEW reference, deliberately: this same function backs both the
+-- per-row trigger below (UPDATE/DELETE) and the per-statement one
+-- (TRUNCATE, which runs with neither row bound).
+CREATE OR REPLACE FUNCTION audit_chain_log_immutable() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'audit_chain_log is append-only: % is not permitted', TG_OP;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_audit_chain_log_immutable ON audit_chain_log;
+CREATE TRIGGER trg_audit_chain_log_immutable
+    BEFORE UPDATE OR DELETE ON audit_chain_log
+    FOR EACH ROW EXECUTE FUNCTION audit_chain_log_immutable();
+DROP TRIGGER IF EXISTS trg_audit_chain_log_immutable_truncate ON audit_chain_log;
+CREATE TRIGGER trg_audit_chain_log_immutable_truncate
+    BEFORE TRUNCATE ON audit_chain_log
+    FOR EACH STATEMENT EXECUTE FUNCTION audit_chain_log_immutable();
+
 -- =====================================================================
 -- L. 漏洞发现持久化
 -- =====================================================================

@@ -73,6 +73,13 @@ func (d *DB) GetInterceptDetail(id int64) (*InterceptDetail, error) {
 
 // ResolveIntercept atomically settles a pending request. A timeout cannot
 // overwrite a human decision and repeat decisions cannot rewrite history.
+//
+// ARTEX-MUTANT hardening: the status transition and the audit-chain link
+// (see audit_chain.go) commit together in one transaction, and the chain is
+// only extended when this call actually wins the race to settle the row
+// (n==1 below) - a losing timeout or a repeat decision must not insert a
+// second link for the same decision. Serialized process-wide by
+// auditChainMu - see audit_chain.go's own comment.
 func (d *DB) ResolveIntercept(id int64, status, action, reason string) (bool, error) {
 	execution := "not_executed"
 	if action == "allow" {
@@ -84,7 +91,17 @@ func (d *DB) ResolveIntercept(id int64, status, action, reason string) (bool, er
 	if err != nil {
 		return false, err
 	}
-	r, err := d.Exec(`UPDATE intercept_pending SET status=$2, decided_at=NOW(),
+
+	auditChainMu.Lock()
+	defer auditChainMu.Unlock()
+
+	tx, err := d.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	r, err := tx.Exec(`UPDATE intercept_pending SET status=$2, decided_at=NOW(),
 		audit=CASE WHEN audit IS NULL THEN NULL ELSE audit || $3::jsonb ||
         CASE WHEN $4='allow' AND audit->>'correlation' IS DISTINCT FROM 'exact'
         THEN '{"execution_status":"unknown"}'::jsonb ELSE '{}'::jsonb END END
@@ -93,7 +110,28 @@ func (d *DB) ResolveIntercept(id int64, status, action, reason string) (bool, er
 		return false, err
 	}
 	n, err := r.RowsAffected()
-	return n == 1, err
+	if err != nil {
+		return false, err
+	}
+	if n != 1 {
+		return false, tx.Commit() // no-op: lost the settle race, nothing to chain
+	}
+
+	var taskID sql.NullString
+	var agentName, toolName, decisionSource string
+	var toolInput []byte
+	if err := tx.QueryRow(`SELECT COALESCE(task_id,''), agent_name, tool_name, decision_source, tool_input
+		FROM intercept_pending WHERE id=$1`, id).
+		Scan(&taskID, &agentName, &toolName, &decisionSource, &toolInput); err != nil {
+		return false, err
+	}
+	if err := appendAuditChain(tx, ChainLink{
+		PendingID: id, TaskID: taskID.String, AgentName: agentName, ToolName: toolName,
+		InputDigest: digestBytes(toolInput), DecisionSource: decisionSource, Status: status, Reason: reason,
+	}); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 // CompleteIntercept only updates the exact recorded call after it was allowed.

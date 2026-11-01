@@ -713,6 +713,24 @@ func decodedToolInput(input []byte) string {
 	return string(out)
 }
 
+// msgDefaultAllow documents why a call fell through with no rule or judge
+// decision at all - see DefaultAllowDecision.
+const msgDefaultAllow = "no intercept rule matched and no LLM judge verdict was available; allowed by default"
+
+// DefaultAllowDecision is the Decision for a call that matched no rule and
+// got no judge verdict (judge disabled, unwired, or its own ask path never
+// applies here since Judge already resolves "ask" itself). ARTEX-MUTANT
+// hardening, informed by reArtex's analysis: this is the ordinary majority
+// case for most tool calls, and before this it produced no record at all -
+// Log() is only ever called by the caller when a rule or the judge actually
+// decided something. Giving this fallthrough its own Decision lets the
+// caller route it through the same Log() -> audit-chain path as every other
+// decision, so "the call ran with no scrutiny" is itself now visible and
+// chained rather than invisible.
+func DefaultAllowDecision() Decision {
+	return Decision{Action: "allow", Message: msgDefaultAllow}
+}
+
 func defaultMessage(action, name string) string {
 	switch action {
 	case "deny":

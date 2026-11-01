@@ -892,6 +892,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/tokens/usage", s.pgUsageStats) // 全局 llm_usage 聚合（仪表盘新版视图）
 
 	mux.HandleFunc("GET /api/audit", s.getAudit)
+	mux.HandleFunc("GET /api/audit/verify", s.getAuditVerify)
 	mux.HandleFunc("POST /api/gc", s.gc)
 	mux.HandleFunc("GET /api/traffic", s.getTraffic)
 	mux.HandleFunc("GET /api/traffic/hosts", s.getTrafficHosts)
@@ -4012,6 +4013,24 @@ func (s *Server) getAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"entries": t.Guard.Audit(), "attributions": t.Guard.Attributions()})
+}
+
+// getAuditVerify is the operator-facing check for the tamper-evident audit
+// chain (ARTEX-MUTANT hardening, see db/audit_chain.go): it walks every
+// chained decision and reports whether the chain still verifies, or exactly
+// which link first fails to - either because its content changed, or
+// because an earlier link in the chain is missing (e.g. a row deleted past
+// the immutability trigger), which shows up as the next surviving link's
+// prev_hash no longer matching. A 200 with ok=false is a real finding, not
+// an error - callers should treat it the same as any other security alert,
+// not retry it.
+func (s *Server) getAuditVerify(w http.ResponseWriter, r *http.Request) {
+	result, err := s.m.PG().VerifyAuditChain()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, result)
 }
 
 // gc is a no-op stub (GC not yet implemented in the new asset store).
