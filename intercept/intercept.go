@@ -253,10 +253,33 @@ func (i *Interceptor) SetReviewer(r Reviewer) {
 
 // defaultEnabledTools is the hard-coded set of tools that enter the intercept
 // rule system when no intercept_enabled_tools setting has been saved.
+//
+// mandatoryInterceptedTools is the same set, but enforced as a floor that
+// IsToolEnabled honors regardless of what intercept_enabled_tools currently
+// holds (see IsToolEnabled's own comment). ARTEX-MUTANT hardening, informed
+// by reArtex's analysis: the security boundary for these tools - the
+// highest-risk ones, the only ones a pentest agent can use to touch the
+// filesystem, shell, or network - lives here, in a compiled constant, not
+// in a hot-editable DB setting. Before this, PUT /api/intercept/tools (or
+// anyone with equivalent DB write access, including the agent itself if it
+// ever found a way to reach that endpoint or write the setting directly)
+// could silently remove Bash or Write from scrutiny by saving a shorter
+// list; GetEnabledTools/IsToolEnabled below both treat the floor as always
+// present so that is no longer possible through this setting alone.
 var defaultEnabledTools = []string{
 	"Bash", "WebFetch", "web_search",
 	"shell_open", "shell_send",
 	"Write", "Edit", "MultiEdit",
+}
+
+var mandatoryInterceptedTools = toolSet(defaultEnabledTools)
+
+func toolSet(names []string) map[string]bool {
+	m := make(map[string]bool, len(names))
+	for _, n := range names {
+		m[n] = true
+	}
+	return m
 }
 
 // New creates an Interceptor backed by d. The rule cache is lazy-loaded on
@@ -355,7 +378,14 @@ func (i *Interceptor) rules() ([]compiledRule, error) {
 // IsToolEnabled returns true if the named tool is in the intercept-enabled set
 // (i.e. it should enter the rule-matching path). Uses the same double-check lock
 // pattern as rules().
+//
+// A tool in mandatoryInterceptedTools always reads as enabled, independent
+// of i.enabledTools (and without even needing it loaded) - see that var's
+// own comment on why this floor cannot be a settings-overridable default.
 func (i *Interceptor) IsToolEnabled(name string) bool {
+	if mandatoryInterceptedTools[name] {
+		return true
+	}
 	i.mu.RLock()
 	if i.enabledTools != nil {
 		v := i.enabledTools[name]
@@ -373,21 +403,29 @@ func (i *Interceptor) IsToolEnabled(name string) bool {
 }
 
 // GetEnabledTools returns the ordered list of tool names that are currently
-// configured to enter the intercept rule system. When the setting has never been
-// saved the hard-coded default list is returned.
+// configured to enter the intercept rule system. When the setting has never
+// been saved the hard-coded default list is returned. The mandatory floor
+// (see mandatoryInterceptedTools) is always included, even if the saved
+// setting omits or never included it - IsToolEnabled enforces the same floor
+// independent of this list, so this keeps what operators see here truthful
+// about what is actually protected, rather than letting the displayed list
+// imply those tools could be turned off by editing it.
 func (i *Interceptor) GetEnabledTools() ([]string, error) {
 	val, ok, err := i.db.GetSetting("intercept_enabled_tools")
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		out := make([]string, len(defaultEnabledTools))
-		copy(out, defaultEnabledTools)
-		return out, nil
-	}
 	var names []string
-	if err := json.Unmarshal([]byte(val), &names); err != nil {
-		return []string{}, nil
+	if !ok {
+		names = append(names, defaultEnabledTools...)
+	} else if err := json.Unmarshal([]byte(val), &names); err != nil {
+		names = nil
+	}
+	seen := toolSet(names)
+	for _, n := range defaultEnabledTools {
+		if !seen[n] {
+			names = append(names, n)
+		}
 	}
 	return names, nil
 }
