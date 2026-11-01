@@ -94,6 +94,12 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 		// or unwired, keep current behavior and allow.
 		d, judged := g.interceptor.Judge(ctx, ev.ToolName, ev.Input)
 		if !judged {
+			// ARTEX-MUTANT hardening: this is the ordinary majority case for
+			// most tool calls (no rule hit, judge off/unwired) and previously
+			// produced zero audit trail at all - see DefaultAllowDecision's
+			// own comment. Log it the same way an explicit rule/judge allow
+			// already is, so it is chained too.
+			g.interceptor.Log(ctx, intercept.ConvIDFromContext(ctx), intercept.DefaultAllowDecision(), ev.ToolName, ev.Input, "allowed")
 			return hook.Result{}
 		}
 		dec = d

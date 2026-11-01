@@ -163,12 +163,38 @@ func (d *DB) CreateDecidedIntercept(ruleID, convID int64, taskID, agentName, too
 	if ruleID != 0 {
 		ruleIDPtr = &ruleID
 	}
+
+	// ARTEX-MUTANT hardening: the row is created already terminal, so it is
+	// chained (audit_chain_log) in the same transaction as the insert.
+	// Serialized process-wide by auditChainMu - see audit_chain.go's own
+	// comment on why.
+	source := interceptSource(ruleID, reason)
+	auditChainMu.Lock()
+	defer auditChainMu.Unlock()
+
+	tx, err := d.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
 	var id int64
-	err := d.QueryRow(`
+	if err := tx.QueryRow(`
 INSERT INTO intercept_pending(rule_id, conversation_id, task_id, agent_name, tool_name, tool_input, status, reason, decided_at, decision_source, audit)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, $10) RETURNING id`,
-		ruleIDPtr, convIDPtr, taskIDPtr, agentName, toolName, raw, status, reason, interceptSource(ruleID, reason), firstAudit(audits)).Scan(&id)
-	return id, err
+		ruleIDPtr, convIDPtr, taskIDPtr, agentName, toolName, raw, status, reason, source, firstAudit(audits)).Scan(&id); err != nil {
+		return 0, err
+	}
+	if err := appendAuditChain(tx, ChainLink{
+		PendingID: id, TaskID: taskID, AgentName: agentName, ToolName: toolName,
+		InputDigest: digestBytes(raw), DecisionSource: source, Status: status, Reason: reason,
+	}); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 const interceptPendingCols = `id, rule_id, conversation_id, task_id, agent_name, tool_name, tool_input, status, reason, decided_at, created_at, decision_source`
