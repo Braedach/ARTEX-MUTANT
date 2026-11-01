@@ -13,14 +13,6 @@
 > ## 🚨 Security & misuse warning — read this first
 >
 > **This repository is published for use only within authorized environments, and only to build defensive and detection capabilities.**
->
-> ARTEX is an autonomous offensive tool powerful enough to carry an attack from reconnaissance through intrusion to data exfiltration with little human involvement, so the harm from misuse is correspondingly large. In October 2026, several Korean news outlets reported that investigators had found indications an earlier version of this tool was used in personal-data breaches targeting Korean financial institutions; the related investigation is ongoing. This repository is not published to help attackers. Its purpose is to help defenders understand how such autonomous AI attacks work and build the capability to detect and block them.
->
-> - **Unauthorized use is a crime in itself.** Do not run any scanning, probing, or exploitation against systems you do not own or for which you lack explicit written authorization. In Australia, unauthorized access to or modification of a computer system is a Commonwealth offence under the **Criminal Code Act 1995 (Cth), Part 10.7**, and unauthorized access to personal information engages the **Privacy Act 1988 (Cth)**. In the Republic of Korea the Network Act and the Personal Information Protection Act apply; internationally the **Budapest Convention** and most states' computer-misuse laws apply.
-> - **Do not target live services or other parties' assets.** Verify only in learning, research, and locally isolated environments you own (deliberately vulnerable targets such as OWASP Juice Shop or DVWA).
-> - **Read it from a defender's point of view.** This repository also compiles defensive and detection material, such as detection signatures and hardening checklists, for autonomous AI attacks. → **[Defense & Detection Guide](docs/defense.md)**
->
-> If you do not agree to this warning and to the [usage restrictions and disclaimer](#license-and-disclaimer) below, do not download or use this repository.
 
 ---
 
