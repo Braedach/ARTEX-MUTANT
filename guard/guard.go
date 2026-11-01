@@ -88,7 +88,7 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 		return hook.Result{}
 	}
 	ctx = intercept.WithCall(ctx, ev.ToolName, ev.Input)
-	dec, matched := g.interceptor.Match(ev.ToolName, ev.Input)
+	dec, matched := g.interceptor.Match(ctx, ev.ToolName, ev.Input)
 	if !matched {
 		// No rule matched. Ask the LLM fallback judge (if enabled); when it is off
 		// or unwired, keep current behavior and allow.
