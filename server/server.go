@@ -1473,6 +1473,29 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 	s.getLLM(w, r)
 }
 
+// recordLLMTestResult feeds a manual connection test's outcome into the same
+// circuit-breaker registry production calls use (ARTEX-MUTANT hardening).
+// Before this, a manual test's result went nowhere but the response toast:
+// the LLM page's "Healthy" badge is driven entirely by this registry, which
+// otherwise only changes on a REAL production call - so a profile saved with
+// a bad key (and never yet used for anything else) kept showing "Healthy"
+// right up until something real tried it and failed, even immediately after
+// a failed manual test. Scoped to testing an EXISTING saved profile
+// (profileID != nil) - an ad-hoc scratch-form test has no profile row to
+// attach a health state to. Uses the same IsHardFailure classification
+// production failover does, so a test failure trips the breaker exactly the
+// way the same error would in real use.
+func recordLLMTestResult(health *llmpool.Registry, profileID *int64, testErr error) {
+	if profileID == nil {
+		return
+	}
+	if testErr != nil {
+		health.Trip(*profileID, testErr.Error(), llmpool.IsHardFailure(testErr))
+	} else {
+		health.Pass(*profileID)
+	}
+}
+
 // testLLM makes a real minimal completion to verify the config works.
 func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -1531,6 +1554,7 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// 只会让一个本来能用的端点测成"超时失败"。测试看的是"这个端点通不通",重试节奏
 	// 是跑起来之后的事。
 	lat, reply, err := agent.TestConnection(r.Context(), cfg)
+	recordLLMTestResult(s.llmHealth, req.ProfileID, err)
 	if err != nil {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
 		return

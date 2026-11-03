@@ -1,6 +1,57 @@
 package server
 
-import "testing"
+import (
+	"errors"
+	"testing"
+
+	"github.com/Autumn-27/artex/llmpool"
+)
+
+// TestRecordLLMTestResult verifies the health-registry wiring described on
+// recordLLMTestResult's own comment: a manual connection test's outcome for
+// an existing saved profile actually changes what the LLM page's "Healthy"
+// badge shows, the same way a real production call would.
+func TestRecordLLMTestResult(t *testing.T) {
+	const profileID int64 = 42
+
+	t.Run("no profile id - ad hoc test, nothing recorded", func(t *testing.T) {
+		health := llmpool.NewRegistry(nil, nil)
+		recordLLMTestResult(health, nil, errors.New("anthropic: status 401: invalid x-api-key"))
+		if health.IsOpen(profileID) {
+			t.Fatal("an ad-hoc test (no profile id) must not record anything")
+		}
+	})
+
+	t.Run("hard failure trips the breaker immediately", func(t *testing.T) {
+		health := llmpool.NewRegistry(nil, nil)
+		recordLLMTestResult(health, &[]int64{profileID}[0], errors.New("anthropic: status 401: invalid x-api-key"))
+		if !health.IsOpen(profileID) {
+			t.Fatal("a hard failure (401) must trip the breaker on the first test")
+		}
+	})
+
+	t.Run("success clears a previously tripped profile", func(t *testing.T) {
+		health := llmpool.NewRegistry(nil, nil)
+		id := profileID
+		recordLLMTestResult(health, &id, errors.New("anthropic: status 401: invalid x-api-key"))
+		if !health.IsOpen(id) {
+			t.Fatal("setup: expected the breaker to be open after the failing test")
+		}
+		recordLLMTestResult(health, &id, nil)
+		if health.IsOpen(id) {
+			t.Fatal("a successful test must clear the tripped state, same as a real successful call would")
+		}
+	})
+
+	t.Run("soft failure does not trip on the first occurrence", func(t *testing.T) {
+		health := llmpool.NewRegistry(nil, nil)
+		id := profileID
+		recordLLMTestResult(health, &id, errors.New("connection reset by peer"))
+		if health.IsOpen(id) {
+			t.Fatal("a single transient (non-hard) failure must not trip the breaker immediately")
+		}
+	})
+}
 
 // The status list drives the "轮询顺序" strip in the UI, so it has to match the
 // order PoolProfiles actually runs: active first, then priority DESC, then id ASC

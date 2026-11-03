@@ -104,7 +104,7 @@ func (p *Pool) Stream(ctx context.Context, req llm.CompletionRequest) iter.Seq2[
 				return
 			}
 			lastErr = failed
-			hard := isHardFailure(failed)
+			hard := IsHardFailure(failed)
 			if p.health.Trip(m.ID, trimErr(failed), hard) {
 				log.Printf("[llmpool] 配置 %q(%s) 已熔断：%s", m.Name, m.Model, trimErr(failed))
 			}
@@ -143,7 +143,7 @@ func (p *Pool) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Mes
 			return llm.Message{}, "", llm.Usage{}, err
 		}
 		lastErr = err
-		hard := isHardFailure(err)
+		hard := IsHardFailure(err)
 		if p.health.Trip(m.ID, trimErr(err), hard) {
 			log.Printf("[llmpool] 配置 %q(%s) 已熔断：%s", m.Name, m.Model, trimErr(err))
 		}
@@ -248,10 +248,10 @@ func shouldFailover(ctx context.Context, err error) bool {
 	return false
 }
 
-// isHardFailure reports whether the failure is deterministic (the profile will
+// IsHardFailure reports whether the failure is deterministic (the profile will
 // keep failing until a human fixes it) rather than transient. Hard failures open
 // the breaker on the first occurrence.
-func isHardFailure(err error) bool {
+func IsHardFailure(err error) bool {
 	switch statusOf(err) {
 	case 401, 402, 403, 404:
 		return true
