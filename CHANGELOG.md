@@ -13,7 +13,13 @@ going forward. In particular, the localization entries there (Spanish, Japanese,
 release history (0.3.x and earlier) and contributor list are preserved verbatim in Chinese in
 `CHANGELOG.zh.md`, kept unchanged so it stays easy to compare against upstream.
 
-## [Unreleased] · ARTEX-MUTANT
+## [0.2.0] · 2026-11-03 · ARTEX-MUTANT hardening & cleanup release
+
+The first versioned release cut from this repository as its own, no-longer-upstream-tracking home (see
+[Origin and attribution](README.md#origin-and-attribution)) — everything below accumulated since the
+1 Nov 2026 split, built and published as `ghcr.io/braedach/artex-mutant:v0.2.0`. Bumped to 0.2.0 rather
+than a patch release: the audit chain, the mandatory intercept floor, and the path-guard are genuinely
+new hardening surfaces, not incremental fixes to existing ones.
 
 ### Security hardening
 
@@ -60,7 +66,14 @@ another fork's code, even where its published analysis identified the issue (see
 - **Dependency security bumps**: `github.com/klauspost/compress` v1.18.6 → v1.18.7 (high-severity
   integer-overflow/OOB-write fix), plus a non-breaking `npm audit fix` pass on `web/` that took it from 24
   vulnerabilities (2 critical, 13 high) down to 6, with zero critical/high remaining
-  ([#15](https://github.com/Braedach/ARTEX-MUTANT/pull/15)).
+  ([#15](https://github.com/Braedach/ARTEX-MUTANT/pull/15)); `ip-address` 10.2.0 → 10.7.5 in
+  `skills/api-recon/scripts` ([#16](https://github.com/Braedach/ARTEX-MUTANT/pull/16)); `puppeteer-core`
+  23.11.1 → 25.16.0 in the same package (9 high alerts, all transitive deps of it), verified compatible
+  with a real launch smoke test against the script's exact options before forcing the major bump
+  ([#19](https://github.com/Braedach/ARTEX-MUTANT/pull/19)). GitHub's Dependabot count across all three
+  manifests (`web/`, `skills/api-recon/scripts/`, `go.mod`) went from 127 open alerts to 2 (both a
+  `shadcn` CLI dependency whose only "fix" is a version downgrade — an npm registry name-reuse artifact,
+  not forced).
 
 ### English-only identity
 
@@ -82,6 +95,12 @@ another fork's code, even where its published analysis identified the issue (see
   conversation title, retest-outcome reasons) and its sibling retest reasons in `db/finding_retests.go`,
   found via a live screenshot that caught the leftover Chinese agent description and a Korean default
   conversation title ("새 대화") in the running app.
+- **Translated the startup banner** ("AI 자율 침투 테스트 시스템" / "버전 ... 수신 대기 ...") — also found live,
+  rebuilding the local dev image; this is exactly what `docker compose logs artex` shows an operator
+  looking for the setup token ([#20](https://github.com/Braedach/ARTEX-MUTANT/pull/20)).
+- **Added fresh English screenshots** (dashboard, chat, intercept rules), captured from this repository's
+  own build, fulfilling the placeholder #6 left behind when the old multi-language screenshots were
+  removed ([#21](https://github.com/Braedach/ARTEX-MUTANT/pull/21)).
 - **The real remaining scope here is large**, not a handful of files: `db/company_scope.go`,
   `db/task_archives_restore.go`, `db/asset_intercept_match.go`, and — found while fixing the above —
   roughly 35 files across `server/` and `selfupdate/` each carrying their own
@@ -95,6 +114,17 @@ another fork's code, even where its published analysis identified the issue (see
   text (lines constructing or validating the agent's own conversational input) — both feed into agent
   input rather than an HTTP response, with `trigger_merge_test.go` explicitly pinning the former's
   current framing, so the same caution applies as to the protected prompts.
+
+### Fixed
+
+- **The LLM page's "Healthy" badge now reflects reality.** It's driven entirely by a circuit-breaker
+  that previously only changed on a real production call failing — a profile saved with a bad or
+  truncated API key kept showing "Healthy" even immediately after manually testing it and seeing the
+  test fail, because "Test connection" never touched that circuit breaker at all. A test's outcome is
+  now fed into the same registry production calls use (same hard-failure classification: 401/402/403/404
+  trip the breaker immediately), so a failing test shows "Tripped" right away and a passing one clears a
+  previously-tripped profile. Found live validating this release against a real target
+  ([#22](https://github.com/Braedach/ARTEX-MUTANT/pull/22)).
 
 ### Infrastructure
 
