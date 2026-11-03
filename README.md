@@ -78,8 +78,23 @@ benchmarked against that exact text — see [Agent-prompt integrity](#agent-prom
 
 ## Screenshots
 
-Removed along with the other-language content (the originals were of the upstream multi-language UI).
-Fresh English-only screenshots from this repository's own build will replace them here.
+Captured from this repository's own build (local dev instance, no real target data — the chat exchange
+and token counts are from a trivial connectivity check, not a real run).
+
+<p align="center">
+  <img src="screenshots/en/dashboard.png" width="800" alt="Dashboard overview"><br>
+  <sub>Dashboard — task/finding/asset counters, LLM token consumption, activity stream</sub>
+</p>
+<p align="center">
+  <img src="screenshots/en/chat.png" width="800" alt="Chat with the Auto agent"><br>
+  <sub>Chat — the built-in "Auto" platform-operations agent</sub>
+</p>
+<p align="center">
+  <img src="screenshots/en/intercept-rules.png" width="800" alt="Intercept rules list"><br>
+  <sub>System → Intercept rules — the built-in tool-call safety rules (see
+  <a href="#system-architecture">System architecture</a> and
+  <a href="#audit-chain-integrity">Audit chain integrity</a>)</sub>
+</p>
 
 ---
 
