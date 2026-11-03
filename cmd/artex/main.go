@@ -37,8 +37,8 @@ const banner = `
 // printBanner writes the startup banner + version/runtime info to stdout.
 func printBanner(addr string) {
 	fmt.Print(banner)
-	fmt.Println("  AI 자율 침투 테스트 시스템")
-	fmt.Printf("  버전 %s  ·  %s/%s  ·  %s  ·  수신 대기 %s\n\n",
+	fmt.Println("  Autonomous AI penetration testing system")
+	fmt.Printf("  version %s  ·  %s/%s  ·  %s  ·  listening on %s\n\n",
 		version, runtime.GOOS, runtime.GOARCH, runtime.Version(), addr)
 }
 
