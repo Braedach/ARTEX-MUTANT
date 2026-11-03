@@ -12,15 +12,18 @@ import (
 
 const FindingRetestAgentKey = "retester"
 
-// 재검증(finding_retest) 종결 사유. finding_retests.error 컬럼에 저장돼 재검증 패널
-// (finding-retest-panel) 의 item.error 로 노출된다(사용자 노출, server/conversations.go 의
-// 형제 사유 convRetest* 와 같은 컬럼·패널이라 함께 한국어로 둔다 — F9). retestNoConclusionReason
-// 은 에이전트가 결론 없이 완료했을 때 caller 가 넘긴 사유를 덮어쓰는 폴백이고,
-// retestServiceRestartReason 은 재시작 복구(RecoverFindingRetests)가 미완 재검증을 봉인할 때 쓴다.
-// 작은따옴표 없는 상수라 SQL 리터럴 자리에 그대로 이어 붙여도 안전하다.
+// Retest (finding_retest) terminal reasons. Stored in the finding_retests.error
+// column and surfaced as the retest panel (finding-retest-panel)'s item.error
+// (user-facing; same column/panel as server/conversations.go's sibling
+// convRetest* reasons, kept in the same language - F9). retestNoConclusionReason
+// is the fallback that overwrites the caller-supplied reason when the agent
+// finished without saving a conclusion; retestServiceRestartReason is used when
+// restart recovery (RecoverFindingRetests) seals an unfinished retest. Neither
+// constant contains a single quote, so it's safe to concatenate directly into a
+// SQL literal.
 const (
-	retestNoConclusionReason   = "에이전트가 재검증 결론을 저장하지 않았습니다. 대화를 확인한 뒤 다시 재검증해 주세요"
-	retestServiceRestartReason = "서비스가 재시작되어 재검증이 중단되었습니다. 다시 시작해 주세요"
+	retestNoConclusionReason   = "The agent did not save a retest conclusion. Please check the conversation, then retest again"
+	retestServiceRestartReason = "The service restarted and the retest was interrupted. Please restart it"
 )
 
 var ErrRetestNotRunning = errors.New("本次复测已结束或尚未开始，请从漏洞详情发起新的复测")
