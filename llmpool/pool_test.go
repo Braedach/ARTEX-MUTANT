@@ -252,12 +252,12 @@ func TestShouldFailoverByStatus(t *testing.T) {
 
 func TestHardVsSoftClassification(t *testing.T) {
 	for _, s := range []int{401, 402, 403, 404} {
-		if !isHardFailure(fmt.Errorf("status %d: x", s)) {
+		if !IsHardFailure(fmt.Errorf("status %d: x", s)) {
 			t.Errorf("status %d should be a hard failure", s)
 		}
 	}
 	for _, s := range []int{408, 429, 500, 502, 503} {
-		if isHardFailure(fmt.Errorf("status %d: x", s)) {
+		if IsHardFailure(fmt.Errorf("status %d: x", s)) {
 			t.Errorf("status %d should be transient, not hard", s)
 		}
 	}
