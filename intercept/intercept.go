@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -675,13 +676,18 @@ func judgeActionLabel(action string) string {
 // Match evaluates the rule list (priority DESC) against a tool call.
 // Returns (Decision, true) for the first matching enabled rule, or
 // (Decision{}, false) if no rule matches.
-func (i *Interceptor) Match(toolName string, input []byte) (Decision, bool) {
+//
+// ctx supplies the call's working directory (see workingDirFromContext and
+// resolvedPathForm) so a rule can be matched against a path argument's
+// resolved form, not only its literal text - see ruleMatches' own comment.
+func (i *Interceptor) Match(ctx context.Context, toolName string, input []byte) (Decision, bool) {
 	rules, err := i.rules()
 	if err != nil || len(rules) == 0 {
 		return Decision{}, false
 	}
+	workingDir := workingDirFromContext(ctx)
 	for _, r := range rules {
-		if ruleMatches(r, toolName, input) {
+		if ruleMatches(r, toolName, input, workingDir) {
 			msg := r.Message
 			if msg == "" {
 				msg = defaultMessage(r.Action, r.Name)
@@ -701,7 +707,7 @@ func (i *Interceptor) Match(toolName string, input []byte) (Decision, bool) {
 	return Decision{}, false
 }
 
-func ruleMatches(r compiledRule, toolName string, input []byte) bool {
+func ruleMatches(r compiledRule, toolName string, input []byte, workingDir string) bool {
 	if r.MatchTarget == "tool_name" {
 		if r.MatchType == "regex" {
 			return r.re != nil && r.re.MatchString(toolName)
@@ -719,7 +725,18 @@ func ruleMatches(r compiledRule, toolName string, input []byte) bool {
 	// escapes into their real characters, so try both forms: raw first (the
 	// common, cheap case), then decoded only if raw didn't match and the
 	// input actually parses as JSON.
-	for _, subject := range []string{string(input), decodedToolInput(input)} {
+	raw, decoded := string(input), decodedToolInput(input)
+	subjects := []string{raw, decoded}
+	// ARTEX-MUTANT hardening (path-guard), informed by reArtex's analysis: a
+	// relative path argument (e.g. "../../etc/passwd", or several "../"
+	// segments buried in a longer Bash command) only reveals where it
+	// actually points once resolved against the call's real working
+	// directory - a rule written to catch "/etc/passwd" never sees that
+	// string in the raw or JSON-decoded input, only after resolution. Add
+	// the resolved form of both as further candidates, same append-another-
+	// subject pattern as the decoded form above.
+	subjects = append(subjects, resolvedPathForm(raw, workingDir), resolvedPathForm(decoded, workingDir))
+	for _, subject := range subjects {
 		if subject == "" {
 			continue
 		}
@@ -734,6 +751,44 @@ func ruleMatches(r compiledRule, toolName string, input []byte) bool {
 		}
 	}
 	return false
+}
+
+// pathLikeToken is a heuristic match for a filesystem-path-shaped fragment
+// in free text (a shell command, a JSON string value): starts with "./",
+// "../", "~/", or "/", followed by anything that isn't whitespace or a
+// quote/backtick (which would end a shell token or a JSON string). Not a
+// real path parser - this only needs to catch the common traversal shapes a
+// Bash command or a Write/Edit file_path argument actually uses.
+var pathLikeToken = regexp.MustCompile(`(?:\.\.?/|~/|/)[^\s"'` + "`" + `]*`)
+
+// resolvedPathForm returns subject with every pathLikeToken replaced by its
+// cleaned form - resolved against workingDir when relative, merely
+// normalized (./, ../ segments collapsed) when already absolute - so e.g.
+// "cat ../../etc/passwd" run from "/data/task/42" becomes
+// "cat /data/etc/passwd" as an additional match candidate. Returns "" when
+// workingDir is empty or no token actually changed, so callers can skip a
+// redundant subject instead of re-checking an unchanged string.
+func resolvedPathForm(subject, workingDir string) string {
+	if workingDir == "" || subject == "" {
+		return ""
+	}
+	changed := false
+	out := pathLikeToken.ReplaceAllStringFunc(subject, func(tok string) string {
+		var resolved string
+		if filepath.IsAbs(tok) {
+			resolved = filepath.Clean(tok)
+		} else {
+			resolved = filepath.Clean(filepath.Join(workingDir, tok))
+		}
+		if resolved != tok {
+			changed = true
+		}
+		return resolved
+	})
+	if !changed {
+		return ""
+	}
+	return out
 }
 
 // decodedToolInput returns input's JSON string values with escapes resolved

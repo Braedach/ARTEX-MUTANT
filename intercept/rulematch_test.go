@@ -16,7 +16,7 @@ func TestRuleMatchesDecodesJSONEscapes(t *testing.T) {
 		MatchType:   "substring",
 		Pattern:     "read",
 	}}
-	if !ruleMatches(r, "Bash", input) {
+	if !ruleMatches(r, "Bash", input, "") {
 		t.Fatal("expected the decoded-form fallback to catch a JSON-escaped pattern")
 	}
 }
@@ -28,7 +28,7 @@ func TestRuleMatchesStillMatchesPlainInput(t *testing.T) {
 		MatchType:   "substring",
 		Pattern:     "read",
 	}}
-	if !ruleMatches(r, "Bash", input) {
+	if !ruleMatches(r, "Bash", input, "") {
 		t.Fatal("expected a plain, unescaped match to still work")
 	}
 }
@@ -40,7 +40,7 @@ func TestRuleMatchesNoFalsePositiveFromDecoding(t *testing.T) {
 		MatchType:   "substring",
 		Pattern:     "read",
 	}}
-	if ruleMatches(r, "Bash", input) {
+	if ruleMatches(r, "Bash", input, "") {
 		t.Fatal("unrelated input must not match")
 	}
 }
@@ -54,7 +54,7 @@ func TestRuleMatchesNonJSONInputFallsBackToRawOnly(t *testing.T) {
 		MatchType:   "substring",
 		Pattern:     "read",
 	}}
-	if !ruleMatches(r, "Bash", input) {
+	if !ruleMatches(r, "Bash", input, "") {
 		t.Fatal("expected raw-bytes match to still apply to non-JSON input")
 	}
 }
