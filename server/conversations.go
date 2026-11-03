@@ -25,52 +25,65 @@ const (
 	maxConversationTitleRunes    = 200
 )
 
-// 대화(채팅) 엔드포인트가 HTTP 응답으로 돌려주는 사용자 노출 문구다. 한국어 UI 에서
-// 요청이 실패하면 이 문구가 그대로 토스트로 뜨므로 한국어로 둔다. 요청 필드명
-// (agent_key·title·pinned·ids·id)·식별자(LLM·API Key·token)는 사용자가 요청을 고치는 데
-// 쓰는 값이라 원문 그대로 둔다. 用語: 配置→설정(B4c-5), agent→에이전트. %d 가 든 상수는
-// fmt.Sprintf 형식 문자열이다. 기본 대화 제목·센티넬은 아래 convDefaultTitle·
-// convAttachmentTitle 로 분리했고(F8), 재검증 사유·트랜스크립트 오류 문구는 아래
-// convRetest* 상수·transcriptErrorSummary 로 분리했다(F9). 트리거 메시지 골격은 아직
-// 이 묶음 밖이다(F10·저널 참조). 로그·주석은 BRIEF 방침상 최하위.
+// User-facing text the conversation (chat) endpoints return in the HTTP response.
+// These surface as a toast as-is on failure, so they must read naturally in
+// English. Request field names (agent_key/title/pinned/ids/id) and identifiers
+// (LLM/API Key/token) are left as the literal values the user needs to fix
+// their request. A constant with %d is an fmt.Sprintf format string. The
+// default conversation title/sentinel is split out below as convDefaultTitle/
+// convAttachmentTitle (F8), and the retest-outcome/transcript-error text is
+// split out below as the convRetest* constants/transcriptErrorSummary (F9).
+// The trigger-message skeleton is still outside this bundle (F10 - see the
+// journal) and is deliberately NOT translated here: it's text fed into the
+// agent's own conversation input, with its own regression test pinning the
+// current framing (trigger_merge_test.go) - the same caution as
+// agent/promptcatalog.go's protected reasoning prompts. Logs/comments are
+// lowest priority per BRIEF policy.
 const (
-	convErrRequestTooLarge = "요청 본문이 너무 큽니다"
-	convErrAgentKeyEmpty   = "agent_key 는 비어 있을 수 없습니다"
-	convErrAgentKeyTooLong = "agent_key 는 최대 %d자까지 입력할 수 있습니다"
-	convErrAgentNotFound   = "에이전트를 찾을 수 없습니다"
-	convErrLLMProfile      = "지정한 LLM 설정이 존재하지 않거나 API Key 가 설정되지 않았습니다"
-	convErrTitleTooLong    = "제목은 최대 %d자까지 입력할 수 있습니다"
-	convErrTitleOrPinned   = "title 또는 pinned 중 하나 이상을 제공해야 합니다"
-	convErrTitleEmpty      = "제목은 비어 있을 수 없습니다"
-	convErrBadConvID       = "대화 id 가 올바르지 않습니다"
-	convErrIDsCount        = "ids 개수는 1에서 %d 사이여야 합니다"
-	convErrMessageEmpty    = "메시지는 비어 있을 수 없습니다"
-	convErrBusy            = "이 대화가 이전 메시지를 처리하고 있습니다. 잠시 기다려 주세요"
+	convErrRequestTooLarge = "the request body is too large"
+	convErrAgentKeyEmpty   = "agent_key cannot be empty"
+	convErrAgentKeyTooLong = "agent_key can be at most %d characters"
+	convErrAgentNotFound   = "agent not found"
+	convErrLLMProfile      = "the specified LLM configuration does not exist, or its API key is not set"
+	convErrTitleTooLong    = "the title can be at most %d characters"
+	convErrTitleOrPinned   = "at least one of title or pinned must be provided"
+	convErrTitleEmpty      = "the title cannot be empty"
+	convErrBadConvID       = "invalid conversation id"
+	convErrIDsCount        = "the number of ids must be between 1 and %d"
+	convErrMessageEmpty    = "the message cannot be empty"
+	convErrBusy            = "this conversation is still processing a previous message. Please wait a moment"
 )
 
-// 대화 기본 제목. convDefaultTitle 은 표시 문구이자 센티넬이다. 대화를 만들 때 제목으로
-// 쓰고, 첫 사용자 메시지가 오면 제목이 비었거나 이 값일 때만 자동 제목으로 덮어쓴다
-// (sendConversationMessage). 대입하는 쪽과 비교하는 쪽이 어긋나면 자동 제목 분기가
-// 깨지므로 한 상수로 묶는다. convAttachmentTitle 은 첨부만 보낸 첫 메시지의 기본 제목이다.
+// Default conversation title. convDefaultTitle is both the displayed text and
+// the sentinel: it's used as the title when a conversation is created, and
+// once the first user message arrives, the title is auto-overwritten only
+// when it's still empty or equal to this value (sendConversationMessage). The
+// assigning side and the comparing side would drift apart otherwise, so both
+// are the same constant. convAttachmentTitle is the default title for a first
+// message that only sent an attachment.
 const (
-	convDefaultTitle    = "새 대화"
-	convAttachmentTitle = "첨부 메시지"
+	convDefaultTitle    = "New conversation"
+	convAttachmentTitle = "Attachment message"
 )
 
-// 재검증(finding_retest) 종결 사유. runConversationTurn 이 재검증 대화를 봉인할 때 쓰고,
-// finding_retests.error 컬럼에 저장돼 재검증 패널(finding-retest-panel) 의 item.error 로
-// 그대로 노출된다(사용자 노출). db/finding_retests.go 의 형제 사유(결론 미저장·서비스 재시작)도
-// 같은 컬럼·패널이라 그 파일에서 함께 한국어로 둔다. 종결 상태 값("failed"/"stopped"/
-// "completed")은 StatusLabel 로 한국어 라벨에 매핑되는 센티넬이라 ASCII 로 유지한다(F9).
+// Retest (finding_retest) terminal reasons. Used when runConversationTurn
+// seals a retest conversation, stored in the finding_retests.error column and
+// surfaced as-is in the retest panel (finding-retest-panel)'s item.error
+// (user-facing). db/finding_retests.go's sibling reasons (conclusion not
+// saved / service restarted) share that same column/panel, so they're kept in
+// English there too. The terminal status values ("failed"/"stopped"/
+// "completed") are sentinels mapped to a display label by StatusLabel, so
+// they stay as plain ASCII identifiers (F9).
 const (
-	convRetestFailedToStart    = "재검증을 시작하지 못했습니다"
-	convRetestStatusReadFailed = "재검증 상태를 읽지 못했습니다. 다시 시작해 주세요"
-	convRetestStoppedOrClosed  = "재검증이 중지되었거나 서비스가 종료되었습니다"
+	convRetestFailedToStart    = "failed to start the retest"
+	convRetestStatusReadFailed = "failed to read the retest status. Please restart it"
+	convRetestStoppedOrClosed  = "the retest was stopped, or the service shut down"
 )
 
-// isDefaultConversationTitle 은 대화가 아직 자동 생성된 기본 제목(빈 값 또는
-// convDefaultTitle)을 달고 있는지 알려준다. 이 경우 첫 사용자 메시지가 제목을 자동으로
-// 덮어쓴다. 생성 기본값과 이 판정이 같은 상수를 쓰므로 둘이 어긋날 수 없다.
+// isDefaultConversationTitle reports whether a conversation still carries its
+// auto-generated default title (empty, or convDefaultTitle) - in that case the
+// first user message auto-overwrites the title. This check and the creation
+// default share the same constant, so the two can never drift apart.
 func isDefaultConversationTitle(title string) bool {
 	return title == "" || title == convDefaultTitle
 }
@@ -543,15 +556,17 @@ func (s *Server) conversationRunContext(id int64, busyKey string) (context.Conte
 	return ctx, cancel
 }
 
-// transcriptErrorSummary 는 실행이 실패했을 때 활동 전사(transcript)에 남기는 오류 요약을
-// 만든다. label 은 실패한 주체를 가리키며, 채팅 턴은 빈 문자열, 작업 메인 에이전트는
-// "메인 에이전트"를 넣는다. 두 전사 모두 "(…오류: …)" 형태로 같게 렌더되도록 한 곳에 모은다.
-// err 원문은 그대로 보존하고 바깥 라벨만 한국어로 둔다(F9).
+// transcriptErrorSummary builds the error summary left in the activity
+// transcript when a run fails. label names the party that failed: empty for
+// a chat turn, "main agent" for a task's main agent. Both transcripts render
+// through this one place so they share the same "(...error: ...)" shape. The
+// original err text is preserved as-is; only the surrounding label is
+// translated (F9).
 func transcriptErrorSummary(label, errMsg string) string {
 	if label != "" {
 		label += " "
 	}
-	return "(" + label + "오류: " + errMsg + ")"
+	return "(" + label + "error: " + errMsg + ")"
 }
 
 func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelCauseFunc, c *db.Conversation, msg, busyKey string) {

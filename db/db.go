@@ -177,41 +177,43 @@ func Open(dsn string) (*DB, error) {
 type builtinAgent struct {
 	key, name, role, desc string
 	vars                  []promptVar
-	interactiveShell      bool // 建行时的默认交互式 shell 开关；ON CONFLICT 不覆盖用户后续手动开关
-	runSeconds            *int // 建行时的单次 run 墙钟上限(秒)；nil=用种子默认(1200)，0=不限时
+	interactiveShell      bool // default interactive-shell switch at seed time; ON CONFLICT never overwrites a user's later manual toggle
+	runSeconds            *int // per-run wall-clock cap in seconds at seed time; nil = use the seed default (1200), 0 = unlimited
 }
 
 type promptVar struct{ name, desc, example, source string }
 
-// intp 返回 v 的指针，用于给 builtinAgent 可选字段(如 runSeconds)显式取值。
+// intp returns a pointer to v, for giving a builtinAgent's optional fields (e.g. runSeconds) an explicit value.
 func intp(v int) *int { return &v }
 
-// builtinAgents mirrors docs §5(a). 内置工具不入库；这里只 seed agent + 变量目录。
-// 注：planner/worker/mainagent/auto 的交互式 shell 默认由下方 interactive_shell_default_v1
-// 块统一置 true（尊重后续 toggle）；这里的 interactiveShell 只给需要「建行即默认开」的新 agent。
+// builtinAgents mirrors docs §5(a). Built-in tools are not stored in the DB; this only seeds the agent + its variable catalog.
+// Note: planner/worker/mainagent/auto's default interactive shell is set true, uniformly, by the
+// interactive_shell_default_v1 block below (which respects a later toggle); interactiveShell here is
+// only for a new agent that needs to start with it on by default at seed time.
 var builtinAgents = []builtinAgent{
-	{"goals", "目标拆解", "goals", "把渗透任务目标拆解成若干独立、可验证的子目标。", []promptVar{
-		{"EngagementDescription", "任务描述（测试对象/背景）", "测试 example.com 站点", "exploration"},
-		// Now 是全局 runtime 变量(见 server.globalPromptVars),不再在各 agent 目录里
-		// 重复定义,否则 withGlobalVars 追加时会与全局项撞名。
+	{"goals", "Goal decomposition", "goals", "Breaks the pentest task's goal down into several independent, verifiable sub-goals.", []promptVar{
+		{"EngagementDescription", "Task description (target/background)", "Test the example.com site", "exploration"},
+		// Now is a global runtime variable (see server.globalPromptVars), no longer
+		// redefined per agent catalog - otherwise withGlobalVars' append would collide
+		// with the global entry's name.
 	}, false, nil},
-	{"planner", "规划", "planner", "读取态势、判定目标，只在确有未覆盖的新方向时补充探索意图（每任务一个规划循环）。", []promptVar{
-		{"Goal", "任务总目标", "拿下 example.com 的管理员权限", "exploration"},
-		{"AssetSummary", "资产计数/类型分布摘要(可选)", "domain:3 ip:5 site:2", "distilled"},
+	{"planner", "Planner", "planner", "Reads the current state and judges the goal, adding an exploration intent only when there's a genuinely uncovered new direction (one planning loop per task).", []promptVar{
+		{"Goal", "The task's overall goal", "Obtain admin privileges on example.com", "exploration"},
+		{"AssetSummary", "Asset count/type distribution summary (optional)", "domain:3 ip:5 site:2", "distilled"},
 	}, false, nil},
-	{"mainagent", "主", "main", "人机接口：观察进展，把人的意图落成 hint 或高优先级意图。", []promptVar{
-		{"Goal", "当前任务目标", "拿下 example.com 的管理员权限", "exploration"},
-		{"AssetSummary", "开局态势摘要(可选)", "domain:3 ip:5", "distilled"},
-		{"FindingsSummary", "已确认漏洞摘要(可选)", "high:1 medium:2", "distilled"},
+	{"mainagent", "Main", "main", "Human-agent interface: observes progress and turns human intent into a hint or a high-priority intent.", []promptVar{
+		{"Goal", "The current task's goal", "Obtain admin privileges on example.com", "exploration"},
+		{"AssetSummary", "Starting-state summary (optional)", "domain:3 ip:5", "distilled"},
+		{"FindingsSummary", "Confirmed-findings summary (optional)", "high:1 medium:2", "distilled"},
 	}, false, nil},
-	{"worker", "执行", "worker", "领取一条意图执行，把发现的事实/漏洞写回知识图谱后停止。", []promptVar{
-		{"ProxyAddr", "记录代理地址(驱动 if 双文案)", "127.0.0.1:8080", "runtime"},
-		{"WorkerName", "worker 自我标识(可选)", "worker-1", "runtime"},
+	{"worker", "Worker", "worker", "Claims one intent and executes it, then stops once the facts/findings it discovers are written back to the knowledge graph.", []promptVar{
+		{"ProxyAddr", "Recording proxy address (drives the if-branch wording)", "127.0.0.1:8080", "runtime"},
+		{"WorkerName", "The worker's own identifier (optional)", "worker-1", "runtime"},
 	}, false, nil},
-	// Auto:内置「平台操作」agent。不参与渗透编排循环,经对话页驱动,用工具操作平台。
-	{"auto", "Auto", "assistant", "平台操作助手：用工具管理任务(建/看/暂停/给提示)与资产，并可创建/修改 skill、自定义工具、MCP。", nil, false, nil},
-	// 渗透测试:内置「独立渗透」agent。经对话页驱动,一人从侦察到收尾走完整条渗透链,自己规划自己执行自己验证。默认开启交互式 shell。
-	{"pentest", "渗透测试", "assistant", "独立渗透 agent：一人从侦察→找攻击面→深入利用→验证→收尾走完整条链，自己规划、自己执行、自己对抗式验证。", nil, true, intp(0)},
+	// Auto: the built-in "platform operations" agent. Does not take part in the pentest orchestration loop - driven from the chat page, operates the platform with tools.
+	{"auto", "Auto", "assistant", "Platform operations assistant: manages tasks (create/view/pause/hint) and assets with tools, and can create or modify skills, custom tools, and MCP.", nil, false, nil},
+	// Penetration test: the built-in "standalone pentest" agent. Driven from the chat page - one agent runs the whole chain, from recon to wrap-up, planning/executing/verifying its own work. Interactive shell on by default.
+	{"pentest", "Penetration test", "assistant", "Standalone pentest agent: runs the whole chain solo, from recon, to finding the attack surface, to deep exploitation, to verification, to wrap-up - planning, executing, and adversarially verifying its own work.", nil, true, intp(0)},
 }
 
 // seedBuiltins inserts the fixed built-in agents and their variable catalog (idempotent).

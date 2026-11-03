@@ -1,11 +1,117 @@
 # Changelog
 
+This document records the changes **this repository, `Braedach/ARTEX-MUTANT`, adds on top of its base**
+(`Braedach/ARTEX`, itself a fork of `jiwoochris/artex-global`). The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). See [Origin and attribution](README.md#origin-and-attribution)
+for the full fork lineage.
 
-This document records the changes that the ARTEX global edition (this fork) adds on top of the upstream repository. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Everything from **"Inherited pre-fork history"** down predates the `ARTEX-MUTANT` split (1 Nov 2026) and
+describes work done in the upstream/base repositories, not this one — kept for reference, not maintained
+going forward. In particular, the localization entries there (Spanish, Japanese, and everything under
+"Localization (i18n)") no longer apply: this repository is deliberately **English-only** (see
+[MAINTAINING.md](MAINTAINING.md)) and that work was reverted here. The upstream project's own per-version
+release history (0.3.x and earlier) and contributor list are preserved verbatim in Chinese in
+`CHANGELOG.zh.md`, kept unchanged so it stays easy to compare against upstream.
 
-The upstream ARTEX project's per-version release history (0.3.x and earlier) and contributor list are preserved verbatim in Chinese in `CHANGELOG.zh.md`. As with `README.zh.md`, the original text is kept unchanged so that it stays easy to compare against upstream changes. The detailed content and rationale for each change can be found in the repository's commit history.
+## [Unreleased] · ARTEX-MUTANT
 
-## [Unreleased]
+### Security hardening
+
+Each fix below is a fresh implementation and its own tests against this source — none is a merge of
+another fork's code, even where its published analysis identified the issue (see
+[Origin and attribution](README.md#origin-and-attribution)).
+
+- **LLM judge fails closed by default**, not open: a model error or unparseable reply now defaults to
+  `deny` rather than `allow` once the fallback judge is enabled ([#1](https://github.com/Braedach/ARTEX-MUTANT/pull/1)).
+- **One-shot secrets are scrubbed from the process environment** after startup reads them
+  (`ARTEX_PG_DSN`, LLM API keys, `ARTEX_ADMIN_PASSWORD`, `ARTEX_SETUP_TOKEN`) — closes a path where a
+  Bash tool call running as the server's own UID could read them back via `/proc/<pid>/environ`
+  ([#1](https://github.com/Braedach/ARTEX-MUTANT/pull/1)).
+- **JSON-escape intercept bypass closed**: a rule's pattern is now also matched against the input with
+  `\uXXXX` escapes resolved, not only the raw bytes, so a JSON-escaped word can no longer sail past a
+  literal-text rule ([#2](https://github.com/Braedach/ARTEX-MUTANT/pull/2)).
+- **Workspace symlink escape closed**: paths are resolved through `filepath.EvalSymlinks` before being
+  confined to the work-dir root ([#3](https://github.com/Braedach/ARTEX-MUTANT/pull/3)).
+- **`steer_work` is bounded**: a maximum message length and queue depth stop an unbounded steer-message
+  queue ([#4](https://github.com/Braedach/ARTEX-MUTANT/pull/4)).
+- **Intercept rule/tool-enablement load failures are now logged**, rate-limited: previously a DB hiccup
+  silently skipped intercept scrutiny for every tool call with no visible trace
+  ([#5](https://github.com/Braedach/ARTEX-MUTANT/pull/5)).
+- **`norma` SDK bumped v0.4.3 → v0.4.4** — fixes stream parsing dropping input usage and `thought_signature`,
+  and four edge cases in long-task large output ([#7](https://github.com/Braedach/ARTEX-MUTANT/pull/7)).
+- **Bounded ask-timeout + ask-fatigue guard**: a DB rule's `ask` decision with no configured timeout no
+  longer waits indefinitely (closing an infinite-wait window for an unattended background task); and more
+  than 5 identical `(agent, tool, input)` ask requests within 10 minutes now auto-deny without creating a
+  new pending record or waking a human ([#8](https://github.com/Braedach/ARTEX-MUTANT/pull/8)).
+- **Tamper-evident audit chain**, and the default-allow logging gap closed: every terminal intercept
+  decision — including the majority case where no rule matched and the judge was off — is now appended to
+  `audit_chain_log`, a hash-linked, append-only table (DB trigger rejects `UPDATE`/`DELETE`/`TRUNCATE`
+  outright) separate from `intercept_pending` so routine task-archival deletion can never look like
+  tampering. `GET /api/audit/verify` independently re-verifies the whole chain. See
+  [Audit chain integrity](README.md#audit-chain-integrity) ([#9](https://github.com/Braedach/ARTEX-MUTANT/pull/9)).
+- **Mandatory intercept floor**: the highest-risk tools (`Bash`, `Write`, `Edit`, `MultiEdit`, `WebFetch`,
+  `web_search`, `shell_open`, `shell_send`) now always enter intercept scrutiny regardless of the
+  `intercept_enabled_tools` setting — a settings write (via the API, or any other DB-write path) can no
+  longer silently remove them from scrutiny ([#10](https://github.com/Braedach/ARTEX-MUTANT/pull/10)).
+- **Path-guard**: intercept rule matching now also tries the input with relative path fragments (e.g.
+  `../../etc/passwd`) resolved against the call's real working directory, so a rule written to catch an
+  absolute path can no longer be defeated by writing it as a relative traversal instead
+  ([#11](https://github.com/Braedach/ARTEX-MUTANT/pull/11)).
+- **Dependency security bumps**: `github.com/klauspost/compress` v1.18.6 → v1.18.7 (high-severity
+  integer-overflow/OOB-write fix), plus a non-breaking `npm audit fix` pass on `web/` that took it from 24
+  vulnerabilities (2 critical, 13 high) down to 6, with zero critical/high remaining
+  ([#15](https://github.com/Braedach/ARTEX-MUTANT/pull/15)).
+
+### English-only identity
+
+- **Converted the repository's own identity to English-only**: non-English docs/UI files removed,
+  README rewritten as this repository's own (not a fork notice), sources acknowledged for license
+  compliance, old screenshots removed pending fresh ones
+  ([#6](https://github.com/Braedach/ARTEX-MUTANT/pull/6)).
+- **Translated seeded database content and report templates the frontend cleanup missed**: all 20
+  built-in tool-call intercept rules and all 4 built-in asset-blocking rules (previously Chinese
+  name/message/note, inserted directly into the DB at first boot, with a one-time migration for databases
+  that already seeded the old text); the Markdown report generators (exploration-graph report, findings
+  summary/detail export, CSV header), previously entirely Korean; and `scripts/check-external-links.py`
+  and its allowlist ([#14](https://github.com/Braedach/ARTEX-MUTANT/pull/14)).
+- **Translated the built-in agents' own names and descriptions** (`goals`/`planner`/`mainagent`/
+  `worker`/`auto`/`pentest` in `db.go`'s `builtinAgents`, including their prompt-variable catalog) —
+  previously Chinese, visible throughout the UI (agent picker, chat header, System → Agents). This seed
+  runs `ON CONFLICT DO UPDATE` on every startup, so no separate migration was needed. Also translated
+  `server/conversations.go`'s HTTP-facing error/status text (request validation, the default
+  conversation title, retest-outcome reasons) and its sibling retest reasons in `db/finding_retests.go`,
+  found via a live screenshot that caught the leftover Chinese agent description and a Korean default
+  conversation title ("새 대화") in the running app.
+- **The real remaining scope here is large**, not a handful of files: `db/company_scope.go`,
+  `db/task_archives_restore.go`, `db/asset_intercept_match.go`, and — found while fixing the above —
+  roughly 35 files across `server/` and `selfupdate/` each carrying their own
+  `*_localized_test.go` pinning their HTTP-facing error text to Korean (a shared `assertKoreanError`
+  helper). This is effectively the whole `server` package's user-facing message surface, not a loose
+  end — worth planning as its own dedicated pass rather than folding further into ad hoc fixes.
+  Deliberately **not** touched, both here and going forward: `agent/promptcatalog.go`'s DB-seeded agent
+  reasoning prompts (see [Agent-prompt integrity](README.md#agent-prompt-integrity)), and
+  `server/conversations.go`'s trigger-message-skeleton functions (`taskContextHeader`,
+  `mergeTriggeredRuns`, `mergeAllRuns`) and `db/finding_retests.go`'s retest-instruction/tool-validation
+  text (lines constructing or validating the agent's own conversational input) — both feed into agent
+  input rather than an HTTP response, with `trigger_merge_test.go` explicitly pinning the former's
+  current framing, so the same caution applies as to the protected prompts.
+
+### Infrastructure
+
+- Split from `Braedach/ARTEX` into this repository (1 Nov 2026): no longer upstream-tracking, build/deploy
+  repointed from `davros`/`claude`. `Braedach/ARTEX`'s inherited `release.yml` duplicate-release workflow
+  disabled on this repository. `Braedach/ARTEX` itself was later deleted outright (same date) once the
+  split was fully verified — see [Origin and attribution](README.md#origin-and-attribution).
+- Repository housekeeping: 7 fully-merged branches removed after confirming each was contained in `main`'s
+  history and had no open PR; 2 Dependabot PRs with internally desynced, broken lockfiles closed as
+  superseded by [#15](https://github.com/Braedach/ARTEX-MUTANT/pull/15), which resolves the same target
+  versions.
+
+---
+
+## Inherited pre-fork history
+
+## [Unreleased] *(upstream, pre-fork — see note above)*
 
 ### Localization (i18n)
 
