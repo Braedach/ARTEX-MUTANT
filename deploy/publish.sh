@@ -89,9 +89,29 @@ set -euo pipefail
 
 # ---- configuration ----------------------------------------------------------
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-STATE_ROOT="${PUBLISH_STATE_ROOT:-${REPO_ROOT}/deploy/build}"
+# State (log, cached GitHub token, digests) lives BESIDE the clone, never inside
+# it: the clone is the Docker build context, and this directory holds a token
+# that can write to this account's repositories. Matches the fleet's other two
+# publish.sh setups (spiderfoot, unifi-gateway-mcp). Was PUBLISH_STATE_ROOT-
+# overridden by hand to /opt/artex-mutant-publish before this default changed to
+# match it directly; the old in-repo default (deploy/build, gitignored) left a
+# stale /opt/artex-publish behind from before the ARTEX -> ARTEX-MUTANT rename
+# whenever the override was forgotten (Design-Reference.md 17.4).
+STATE_ROOT="${PUBLISH_STATE_ROOT:-$(dirname "$REPO_ROOT")/artex-mutant-publish}"
+case "$(realpath -m "$STATE_ROOT")/" in
+  "$(realpath -m "$REPO_ROOT")/"*)
+    echo "[ERROR] STATE_ROOT (${STATE_ROOT}) is inside the repo / Docker build context (${REPO_ROOT})." >&2
+    echo "[ERROR] It holds the GitHub token; refusing to run. Set PUBLISH_STATE_ROOT outside the clone." >&2
+    exit 1 ;;
+esac
 LOG_FILE="${STATE_ROOT}/publish.log"
-GHCR_TOKEN_FILE="${STATE_ROOT}/.ghcr-token"   # chmod 600, gitignored
+GHCR_TOKEN_FILE="${STATE_ROOT}/.ghcr-token"   # chmod 600, outside the repo
+# Fleet-wide shared store for the one Davros build token (every project on this
+# host uses the same PAT; Design-Reference.md 17.1/17.4). A fresh save below
+# goes here, not to GHCR_TOKEN_FILE directly, so rotating or re-entering the
+# token in any one project's run fixes it for all of them instead of forking
+# another local copy.
+DAVROS_GHCR_TOKEN_CANONICAL="/etc/davros/ghcr-token"
 
 GHCR_NAMESPACE="braedach"
 GHCR_REGISTRY="ghcr.io"
@@ -171,10 +191,16 @@ if [[ "$CHECK_ONLY" -eq 0 ]]; then
   if [[ ! -f "$GHCR_TOKEN_FILE" && -t 0 ]]; then
     read -rp "Save for future/repeat runs at ${GHCR_TOKEN_FILE}? [y/N] " save_answer
     if [[ "$save_answer" =~ ^[Yy] ]]; then
-      umask 077
-      echo "$GH_TOKEN_VAL" > "$GHCR_TOKEN_FILE"
-      chmod 600 "$GHCR_TOKEN_FILE"
-      info "Saved to ${GHCR_TOKEN_FILE} (chmod 600)"
+      if ( umask 077; echo "$GH_TOKEN_VAL" > "$DAVROS_GHCR_TOKEN_CANONICAL" ) 2>/dev/null; then
+        chmod 600 "$DAVROS_GHCR_TOKEN_CANONICAL"
+        ln -sf "$DAVROS_GHCR_TOKEN_CANONICAL" "$GHCR_TOKEN_FILE"
+        info "Saved to the shared token store (${DAVROS_GHCR_TOKEN_CANONICAL}); ${GHCR_TOKEN_FILE} now symlinks to it"
+      else
+        umask 077
+        echo "$GH_TOKEN_VAL" > "$GHCR_TOKEN_FILE"
+        chmod 600 "$GHCR_TOKEN_FILE"
+        warn "Could not write ${DAVROS_GHCR_TOKEN_CANONICAL} - saved a LOCAL copy at ${GHCR_TOKEN_FILE} instead. Move it into the shared store and symlink by hand."
+      fi
     fi
   fi
 
