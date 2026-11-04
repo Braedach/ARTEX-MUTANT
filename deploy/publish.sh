@@ -274,6 +274,24 @@ ok "Binary built: $(du -h "${REPO_ROOT}/dist/amd64/artex" | cut -f1)"
 
 # ---- build: Docker image via the repo's own Dockerfile -----------------------
 IMAGE_LOCAL="artex:${TAG}"
+
+# Runs on ANY exit, not just a clean one: a run that dies after the image is
+# built or pushed (e.g. `gh release create` failing under set -e) used to skip
+# the cleanup at the bottom of this script entirely, leaving that run's image
+# on disk - the same kind of leftover-image buildup a stale RC tag causes,
+# just via a failed/retried run instead. Tags that were never created (e.g.
+# GHCR_REF_LATEST on an -rc build) just no-op here.
+cleanup_images() {
+  local tags=()
+  [[ -n "${IMAGE_LOCAL:-}" ]] && tags+=("$IMAGE_LOCAL")
+  [[ -n "${GHCR_REF_VER:-}" ]] && tags+=("$GHCR_REF_VER")
+  [[ -n "${GHCR_REF_LATEST:-}" ]] && tags+=("$GHCR_REF_LATEST")
+  [[ ${#tags[@]} -eq 0 ]] && return 0
+  docker rmi "${tags[@]}" >/dev/null 2>&1 || true
+  docker image prune -f >/dev/null 2>&1 || true
+}
+trap cleanup_images EXIT
+
 info "docker build (uses the pre-built dist/amd64/artex above)..."
 docker build -t "$IMAGE_LOCAL" "$REPO_ROOT" 2>&1 | tee -a "$LOG_FILE"
 ok "Image built: ${IMAGE_LOCAL}"
@@ -323,15 +341,15 @@ gh release create "$TAG" \
   "${PKG_DIR}/SHA256SUMS"
 ok "Release ${TAG} published: https://github.com/${GH_REPO_SLUG}/releases/tag/${TAG}"
 
-# ---- record state, clean up local images ------------------------------------
+# ---- record state ------------------------------------------------------------
 {
   echo "tag=${TAG}"
   echo "sha=${CURRENT_SHA}"
   echo "published=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } > "$STATE_FILE"
 
-docker rmi "$IMAGE_LOCAL" "$GHCR_REF_VER" "$GHCR_REF_LATEST" >/dev/null 2>&1 || warn "Could not remove local images after push (non-fatal)"
-docker image prune -f | tee -a "$LOG_FILE"
+# Local images (and the build cache) are removed by the cleanup_images EXIT
+# trap above, which runs here too on a normal, successful exit.
 
 ok "Build and publish complete for ${TAG}"
 echo ""
