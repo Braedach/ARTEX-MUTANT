@@ -17,6 +17,11 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
 
 ### Security hardening
 
+- **Host deletion can no longer move the traffic store's internal directories**: a recorded host is attacker-influenced,
+  and host deletion moves the matching per-host directory aside. A host named `_blobs`, `_ca`, `_index` or
+  `_delete_staging` mapped onto the proxy's own blob store, CA directory or index. Host directories now come from one
+  checked helper (strictly inside the traffic directory, never a `_`-prefixed name), staging refuses any path outside
+  it, and restoring checks both ends. Tests added. (Code-scanning `go/path-injection` alerts in `traffic`.)
 - **Path handling hardened at the point of use** (code-scanning `go/path-injection` and `go/zipslip` alerts): every
   skill-directory join now goes through `joinWithin`, an independent `filepath.IsLocal` / `Rel` containment check
   (rejecting `.`, `..` and absolute paths), on top of the existing name whitelists; skill-upload and task-archive
