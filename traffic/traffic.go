@@ -673,6 +673,13 @@ func sanitize(s string) string {
 	if out == "" || out == "_" {
 		return "root"
 	}
+	// ARTEX-MUTANT hardening: "." and ".." contain no separator, so they survived the
+	// replacer, and filepath.Join(t.dir, "..") then names the PARENT of the traffic
+	// directory. A recorded host is attacker-influenced (the agent can be made to
+	// request any URL), so neutralise the two special names.
+	if out == "." || out == ".." {
+		return strings.Repeat("_", len(out))
+	}
 	if len(out) > 120 {
 		out = out[:120]
 	}

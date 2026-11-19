@@ -17,6 +17,12 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
 
 ### Security hardening
 
+- **Path handling hardened at the point of use** (code-scanning `go/path-injection` and `go/zipslip` alerts): every
+  skill-directory join now goes through `joinWithin`, an independent `filepath.IsLocal` / `Rel` containment check
+  (rejecting `.`, `..` and absolute paths), on top of the existing name whitelists; skill-upload and task-archive
+  extraction use it too. Found while triaging: a recorded traffic host of `.` or `..` mapped onto the traffic
+  directory or its parent (`sanitize` only replaced separators), so a host-delete could target the wrong directory;
+  those two names are now neutralised. Tests added for both.
 - **Platform secrets are off-limits to the agent's file tools** (new `pathguard` package): `Read`, `Write`, `Edit`,
   `MultiEdit`, `LS`, `Glob` and `Grep` can no longer reach the JWT signing key, the MITM CA directory, the container
   env file, `/run/secrets`, or `/proc/<pid>/{environ,cmdline,mem,maps,mounts}`. Symlinks (including a symlinked
