@@ -17,6 +17,14 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
 
 ### Security hardening
 
+- **Stored credentials are bound to the address they were saved for**: the LLM connection test and the model-list
+  endpoint fell back to a stored profile key (or the global key) against whatever base URL and proxy the request
+  named, so anyone holding a session could send the stored key to a server they control. A stored key is now used
+  only when the request's address and proxy match the stored ones; otherwise the key must be entered. The
+  MCP legacy-SSE client also refuses a server-announced POST endpoint on a different origin, which would have
+  carried the configured `Authorization` headers to a host the operator never set up. (Notification channels
+  already had this protection.) Found while triaging code-scanning request-forgery alerts; same class as a
+  critical fix in `BaaRai/ARTEX`, implemented fresh here with tests.
 - **Path handling hardened at the point of use** (code-scanning `go/path-injection` and `go/zipslip` alerts): every
   skill-directory join now goes through `joinWithin`, an independent `filepath.IsLocal` / `Rel` containment check
   (rejecting `.`, `..` and absolute paths), on top of the existing name whitelists; skill-upload and task-archive
