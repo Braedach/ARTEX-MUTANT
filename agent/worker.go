@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -476,7 +477,13 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		opts.SessionID = WorkerSessionID(ts.ID(), intent.ID)
 	}
 	intentID := intent.ID
+	// toolCalls counts tool_use activity on this run, so a worker that acted can be told
+	// apart from a thinking-only no-op (see ReasonUnproductiveNoop).
+	var toolCalls int
 	emitWrap := func(r db.Activity) {
+		if r.Kind == "tool_use" {
+			toolCalls++
+		}
 		if emit != nil {
 			r.NodeID, r.Worker = &intentID, name
 			emit(r)
@@ -530,6 +537,10 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// enters the wrap-up phase on the live ctx, so a run whose tool overran the budget
 	// still settles (no external hard-timeout backstop needed). ctx itself carries only
 	// pause / planner kill / shutdown, which the engine distinguishes and re-queues/stops.
-	_, reason, err := captureRunSession(ctx, s, input, emitWrap)
+	finalText, reason, err := captureRunSession(ctx, s, input, emitWrap)
+	if isUnproductiveNoop(reason, err, toolCalls, finalText) {
+		log.Printf("[worker %s] intent %d: thinking-only run, no tool call and no text", name, intent.ID)
+		reason = ReasonUnproductiveNoop
+	}
 	return reason, tsx.Writes(), err
 }
