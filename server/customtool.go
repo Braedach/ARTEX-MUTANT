@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -455,7 +456,7 @@ func (s *Server) runHTTPTool(ctx context.Context, execRaw json.RawMessage, param
 	for k, v := range spec.Headers {
 		req.Header.Set(k, renderTemplate(v, params, identity))
 	}
-	client := &http.Client{Timeout: timeoutOr(spec.TimeoutMs, 30000)}
+	client := &http.Client{Timeout: timeoutOr(spec.TimeoutMs, 30000), CheckRedirect: redirectDropHeaders(spec.Headers)}
 	if tr := s.httpProxyTransport(spec); tr != nil {
 		client.Transport = tr
 	}
@@ -468,6 +469,26 @@ func (s *Server) runHTTPTool(ctx context.Context, execRaw json.RawMessage, param
 	out := map[string]any{"status": resp.StatusCode, "body": string(respBody)}
 	b, _ := json.Marshal(out)
 	return actool.Text(actool.Capture(tc, string(b))), nil
+}
+
+// redirectDropHeaders returns a CheckRedirect that removes the tool's own configured
+// headers (usually an API key) when a redirect leaves the original host. net/http only
+// strips Authorization and Cookie across hosts and copies every other header, so a
+// token in a custom header would otherwise follow the redirect to whoever the server
+// pointed at. Same-host redirects keep them. ARTEX-MUTANT hardening; the notification
+// channels already refuse cross-host redirects.
+func redirectDropHeaders(configured map[string]string) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		if len(via) > 0 && !strings.EqualFold(req.URL.Host, via[0].URL.Host) {
+			for k := range configured {
+				req.Header.Del(k)
+			}
+		}
+		return nil
+	}
 }
 
 // httpProxyTransport builds a Transport for the http tool's proxy config, or nil
