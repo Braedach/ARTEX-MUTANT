@@ -27,6 +27,7 @@ import (
 	"github.com/Autumn-27/artex/llmpool"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/artex/notify"
+	"github.com/Autumn-27/artex/pathguard"
 	"github.com/Autumn-27/artex/report"
 	"github.com/Autumn-27/artex/traffic"
 	"github.com/Autumn-27/norma/llm"
@@ -230,6 +231,11 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	if err != nil {
 		log.Fatalf("[auth] JWT key: %v", err)
 	}
+	// Platform secrets the agent's file tools may never touch (pathguard): the JWT
+	// signing key (current and legacy location), the MITM CA directory, and the
+	// container env file next to the executable.
+	pathguard.Protect(filepath.Join(keyDir, jwtKeyFilename), filepath.Join(dataDir, jwtKeyFilename),
+		filepath.Join(dataDir, "traffic", "_ca"), filepath.Join(keyDir, ".env"))
 	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key, chatBusy: map[string]bool{},
 		chatCancel: map[string]context.CancelCauseFunc{}, triggerQ: map[string][]triggeredRun{},
 		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},

@@ -348,7 +348,7 @@ func (s *Server) runCommandTool(ctx context.Context, execRaw json.RawMessage, pa
 	if strings.TrimSpace(spec.Command) == "" {
 		return actool.Errorf("command 为空"), nil
 	}
-	cmd := renderTemplate(spec.Command, params, shellQuote)
+	cmd := renderCommandTemplate(spec.Command, params)
 	// 复用 Bash 也在用的底层 run(经 Bash CoreTool.Call):自动继承安全 floor/超时/
 	// 代理 env/输出溢出。工具与 Bash 平级、共用底层,不经过 Bash 这个工具让模型调。
 	bashIn, _ := json.Marshal(map[string]any{"command": cmd})
@@ -506,6 +506,62 @@ func identity(s string) string { return s }
 
 // shellQuote single-quotes a value for safe shell interpolation.
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// renderCommandTemplate renders a shell command template in a single left-to-right
+// pass, escaping each {name} placeholder for the shell quoting context it sits in
+// (ARTEX-MUTANT hardening). shellQuote alone is only safe for a bare placeholder:
+// inside a template's own double quotes a single-quoted value is just text, so the
+// value's ", $(...) and backticks stay live and can close the template's quote and
+// run a second command. Contexts: bare -> single-quoted; inside "..." -> escape
+// backslash, double quote, dollar and backtick; inside '...' -> close, escape, reopen.
+// A single pass also means a substituted value is never re-scanned, so a value that
+// itself contains "{other}" cannot inject another parameter. HTTP/JSON templates keep
+// using renderTemplate: shell escaping would corrupt them.
+// Independently identified upstream (artex-global #69); implemented fresh here.
+func renderCommandTemplate(tmpl string, params map[string]any) string {
+	var out strings.Builder
+	var q byte // active quote char: 0, '\'' or '"'
+	for i := 0; i < len(tmpl); i++ {
+		c := tmpl[i]
+		if c == '{' {
+			if end := strings.IndexByte(tmpl[i:], '}'); end > 0 {
+				if v, ok := params[tmpl[i+1:i+end]]; ok {
+					out.WriteString(quoteForContext(valToStr(v), q))
+					i += end
+					continue
+				}
+			}
+		}
+		out.WriteByte(c)
+		switch {
+		case q == '\'':
+			if c == '\'' {
+				q = 0
+			}
+		case c == '\\' && i+1 < len(tmpl):
+			i++
+			out.WriteByte(tmpl[i])
+		case q == '"':
+			if c == '"' {
+				q = 0
+			}
+		case c == '"' || c == '\'':
+			q = c
+		}
+	}
+	return out.String()
+}
+
+// quoteForContext escapes s for the shell quote context q (see renderCommandTemplate).
+func quoteForContext(s string, q byte) string {
+	switch q {
+	case '\'':
+		return strings.ReplaceAll(s, "'", `'\''`)
+	case '"':
+		return strings.NewReplacer(`\`, `\\`, `"`, `\"`, "$", `\$`, "`", "\\`").Replace(s)
+	}
+	return shellQuote(s)
+}
 
 // renderTemplate replaces {name} placeholders with each param's rendered value.
 func renderTemplate(tmpl string, params map[string]any, quote func(string) string) string {

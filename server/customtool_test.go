@@ -195,3 +195,57 @@ func TestHTTPToolTruncatesLargeBody(t *testing.T) {
 		t.Fatalf("oversized http body was not truncated: len=%d", len(out))
 	}
 }
+
+// TestRenderCommandTemplateShellSafe runs the rendered command through a real
+// shell: whatever the quote context the template puts around the placeholder, a
+// hostile value must come out as the literal text, never execute.
+func TestRenderCommandTemplateShellSafe(t *testing.T) {
+	hostile := []string{
+		`plain`,
+		`a b`,
+		`x" ; echo PWNED ; echo "`,
+		`$(echo PWNED)`,
+		"`echo PWNED`",
+		`it's`,
+		`x' ; echo PWNED ; echo '`,
+		`back\slash`,
+		`$HOME`,
+		`{other}`,
+	}
+	templates := []struct{ tmpl, pre, post string }{
+		{`printf %s {v}`, "", ""},
+		{`printf %s "{v}"`, "", ""},
+		{`printf %s '{v}'`, "", ""},
+		{`printf %s "pre-{v}-post"`, "pre-", "-post"},
+	}
+	for _, tc := range templates {
+		for _, val := range hostile {
+			cmd := renderCommandTemplate(tc.tmpl, map[string]any{"v": val, "other": "INJECTED"})
+			out, err := exec.Command("sh", "-c", cmd).Output()
+			if err != nil {
+				t.Fatalf("%s with %q: %v (cmd %s)", tc.tmpl, val, err, cmd)
+			}
+			if want := tc.pre + val + tc.post; string(out) != want {
+				t.Fatalf("%s with %q: got %q want %q (cmd %s)", tc.tmpl, val, out, want, cmd)
+			}
+		}
+	}
+}
+
+// TestRenderCommandTemplateBareUnchanged pins the bare-placeholder behaviour to
+// what shellQuote always produced.
+func TestRenderCommandTemplateBareUnchanged(t *testing.T) {
+	got := renderCommandTemplate("nmap -p {ports} {target}", map[string]any{"ports": "80,443", "target": "a b"})
+	if got != "nmap -p '80,443' 'a b'" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// TestRenderTemplateIdentityKeepsJSONBody guards the HTTP path: a quoted JSON
+// placeholder must not be shell-escaped.
+func TestRenderTemplateIdentityKeepsJSONBody(t *testing.T) {
+	got := renderTemplate(`{"a":"{x}"}`, map[string]any{"x": `q"$z`}, identity)
+	if got != `{"a":"q"$z"}` {
+		t.Fatalf("got %q", got)
+	}
+}

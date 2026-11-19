@@ -56,6 +56,9 @@ func WithReviewWorkingDirectory(ctx context.Context, workingDir string) context.
 // path-guard use (see resolvedPathForm). Every agent role (worker, chat,
 // mainagent, planner) binds this to the real directory it also passes as
 // the SDK's own WorkingDir option, so it reflects the tool's actual CWD.
+// WorkingDir returns the task working directory carried by ctx ("" when none).
+func WorkingDir(ctx context.Context) string { return workingDirFromContext(ctx) }
+
 func workingDirFromContext(ctx context.Context) string {
 	env, _ := ctx.Value(reviewContextKey{}).(reviewEnvironment)
 	return env.workingDir
