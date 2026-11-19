@@ -686,6 +686,30 @@ func sanitize(s string) string {
 	return out
 }
 
+// hostDir returns the legacy per-host directory for a recorded host, or false when
+// the name cannot safely name one. ARTEX-MUTANT hardening: a recorded host is
+// attacker-influenced (the agent can be made to request any URL), and these
+// directories are moved and removed by host deletion. A name that starts with "_"
+// would land on an internal directory (_blobs, _index, _ca, _delete_staging), and
+// anything not strictly inside the traffic directory must never be touched.
+func (t *Traffic) hostDir(host string) (string, bool) {
+	name := sanitize(host)
+	if strings.HasPrefix(name, "_") {
+		return "", false
+	}
+	return t.insideDir(filepath.Join(t.dir, name))
+}
+
+// insideDir reports whether p is a strict, non-internal descendant of the traffic
+// directory (a first path component starting with "_" is reserved for internals).
+func (t *Traffic) insideDir(p string) (string, bool) {
+	rel, err := filepath.Rel(t.dir, p)
+	if err != nil || rel == "." || !filepath.IsLocal(rel) || strings.HasPrefix(rel, "_") {
+		return "", false
+	}
+	return filepath.Join(t.dir, rel), true
+}
+
 var blobHashRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // blobPath locates a stored blob. Current writes use one bucket level; blobs
@@ -1058,10 +1082,10 @@ func (t *Traffic) DeleteHost(host string) (int64, error) {
 	// set — a staged tree is invisible to it.
 	stageDir, moves, err := t.stageTrees(legacy)
 	if err != nil {
-		return 0, errors.Join(err, restoreTrees(stageDir, moves))
+		return 0, errors.Join(err, t.restoreTrees(stageDir, moves))
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, errors.Join(fmt.Errorf("提交流量索引删除: %w", err), restoreTrees(stageDir, moves))
+		return 0, errors.Join(fmt.Errorf("提交流量索引删除: %w", err), t.restoreTrees(stageDir, moves))
 	}
 	t.reapStage(stageDir)
 	if n > 0 {
@@ -1107,10 +1131,10 @@ func (t *Traffic) DeleteAll() (deleted int64, reclaimed int64, err error) {
 	// deletion, exactly as in DeleteHost.
 	stageDir, moves, err := t.stageTrees(trees)
 	if err != nil {
-		return 0, 0, errors.Join(err, restoreTrees(stageDir, moves))
+		return 0, 0, errors.Join(err, t.restoreTrees(stageDir, moves))
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, 0, errors.Join(fmt.Errorf("提交流量索引删除: %w", err), restoreTrees(stageDir, moves))
+		return 0, 0, errors.Join(fmt.Errorf("提交流量索引删除: %w", err), t.restoreTrees(stageDir, moves))
 	}
 	t.reapStage(stageDir)
 	if err := t.gcBlobs(); err != nil {
@@ -1137,7 +1161,9 @@ func (t *Traffic) allHostTrees() ([]string, error) {
 	var dirs []string
 	for _, e := range entries {
 		if e.IsDir() && !strings.HasPrefix(e.Name(), "_") {
-			dirs = append(dirs, filepath.Join(t.dir, e.Name()))
+			if d, ok := t.insideDir(filepath.Join(t.dir, e.Name())); ok {
+				dirs = append(dirs, d)
+			}
 		}
 	}
 	return dirs, nil
@@ -1225,7 +1251,9 @@ func (t *Traffic) hostTrees(where string, args ...any) ([]string, error) {
 		if err := rows.Scan(&h); err != nil {
 			return nil, err
 		}
-		dirs = append(dirs, filepath.Join(t.dir, sanitize(h)))
+		if d, ok := t.hostDir(h); ok {
+			dirs = append(dirs, d)
+		}
 	}
 	return dirs, rows.Err()
 }
@@ -1268,6 +1296,13 @@ func (t *Traffic) stageTreesForArchive(dirs, hosts []string, archiveID, taskID i
 			continue
 		}
 		seen[source] = struct{}{}
+		// Independent containment check at the point of use: only a plain host
+		// directory inside the traffic directory may be moved aside.
+		clean, ok := t.insideDir(source)
+		if !ok {
+			return stageDir, moves, fmt.Errorf("拒绝移动流量目录之外的路径 %q", source)
+		}
+		source = clean
 		if _, err := os.Lstat(source); err != nil {
 			if os.IsNotExist(err) {
 				continue
@@ -1332,10 +1367,18 @@ func writeHostDeleteStageJournal(path string, journal hostDeleteStageJournal) er
 
 // restoreTrees puts staged directories back where they came from, newest move
 // first, and drops the staging directory once everything is home.
-func restoreTrees(stageDir string, moves []stagedTrafficPath) error {
+func (t *Traffic) restoreTrees(stageDir string, moves []stagedTrafficPath) error {
 	var errs []error
 	for i := len(moves) - 1; i >= 0; i-- {
 		move := moves[i]
+		// Both ends must still be where staging put them: a host directory inside the
+		// traffic directory, and a path inside this stage directory.
+		src, srcOK := t.insideDir(move.source)
+		if !srcOK || stageDir == "" || !strings.HasPrefix(move.staged, stageDir+string(os.PathSeparator)) {
+			errs = append(errs, fmt.Errorf("restore refused for %q", move.source))
+			continue
+		}
+		move.source = src
 		if _, err := os.Lstat(move.source); err == nil {
 			errs = append(errs, fmt.Errorf("restore destination already exists: %s", move.source))
 			continue
@@ -1458,7 +1501,9 @@ func (t *Traffic) stageDeleteHostsExact(hosts []string, archiveID, taskID int64)
 	// own an orphaned directory that this deletion should take with it.
 	legacy := make([]string, 0, len(unique))
 	for _, h := range unique {
-		legacy = append(legacy, filepath.Join(t.dir, sanitize(h)))
+		if d, ok := t.hostDir(h); ok {
+			legacy = append(legacy, d)
+		}
 	}
 
 	tx, err := t.db.Begin()
@@ -1561,7 +1606,7 @@ func (t *Traffic) RecoverHostDeleteStages(archiveCommitted func(int64, int64) (b
 			}
 		}
 		if !committed {
-			if err := restoreTrees(stageDir, moves); err != nil {
+			if err := t.restoreTrees(stageDir, moves); err != nil {
 				errs = append(errs, err)
 			}
 			continue
@@ -1643,7 +1688,7 @@ func (s *HostDeleteStage) rollbackLocked() error {
 			errs = append(errs, fmt.Errorf("回滚流量索引: %w", err))
 		}
 	}
-	if err := restoreTrees(s.stageDir, s.moves); err != nil {
+	if err := s.traffic.restoreTrees(s.stageDir, s.moves); err != nil {
 		errs = append(errs, err)
 	}
 	s.done = true
@@ -1660,7 +1705,7 @@ func (s *HostDeleteStage) Commit() error {
 	if err := s.tx.Commit(); err != nil {
 		// A failed SQLite commit normally rolls the transaction back. Restore the
 		// trees so the traffic store remains internally consistent and recoverable.
-		restoreErr := restoreTrees(s.stageDir, s.moves)
+		restoreErr := s.traffic.restoreTrees(s.stageDir, s.moves)
 		s.done = true
 		s.traffic.wmu.Unlock()
 		return errors.Join(fmt.Errorf("提交流量索引删除: %w", err), restoreErr)

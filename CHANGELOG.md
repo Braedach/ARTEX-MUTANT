@@ -17,6 +17,11 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
 
 ### Security hardening
 
+- **Host deletion can no longer move the traffic store's internal directories**: a recorded host is attacker-influenced,
+  and host deletion moves the matching per-host directory aside. A host named `_blobs`, `_ca`, `_index` or
+  `_delete_staging` mapped onto the proxy's own blob store, CA directory or index. Host directories now come from one
+  checked helper (strictly inside the traffic directory, never a `_`-prefixed name), staging refuses any path outside
+  it, and restoring checks both ends. Tests added. (Code-scanning `go/path-injection` alerts in `traffic`.)
 - **A worker run that did nothing is no longer recorded as `done`**: a run that ends naturally with no tool call and no
   text (a thinking-only turn the existing empty-turn nudge could not rescue) was classified as a successful
   completion, so the planner treated the direction as covered and the task could stall with nothing found. It is now
