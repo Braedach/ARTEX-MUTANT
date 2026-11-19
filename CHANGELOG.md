@@ -24,6 +24,18 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
   contains a secret is refused. The list is compiled in and fed from the live key and data directories, never the
   database, so a settings write cannot disable it. `Bash` stays with the intercept rules and the judge. Design
   informed by the equivalent package in `wufufu770/reArtex`; implemented fresh here.
+- **Custom-tool command templates are escaped for their own quoting context**: a `{name}` placeholder the template
+  wraps in double quotes (`echo "{target}"`) previously received a single-quoted value, where the value's `"`,
+  `$(...)` and backticks stayed live and could close the template's quote and run a second command. Placeholders are
+  now rendered in a single pass and escaped for the context they sit in (bare, `"..."`, `'...'`), and a substituted
+  value is never re-scanned, so it cannot inject another parameter. HTTP/JSON templates are unchanged. Identified
+  upstream (`artex-global` #69, open); implemented fresh here, shell-only, with tests that run the result through
+  a real shell.
+- **Unreadable intercept rules now fail toward a human**, not toward allow: when the rule set cannot be loaded
+  (for example a database hiccup), `Match` returns an `ask` decision instead of "no rule matched", which the guard
+  previously turned into default-allow for the mandatory-floor tools. With the database still down the approval
+  itself fails closed. This closes the failure mode the earlier load-failure logging (#5) only made visible.
+  Independently identified upstream (`artex-global` #53); implemented fresh here with its own tests.
 
 ## [0.2.0] · 2026-11-03 · ARTEX-MUTANT hardening & cleanup release
 
