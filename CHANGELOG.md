@@ -17,6 +17,11 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
 
 ### Security hardening
 
+- **A worker run that did nothing is no longer recorded as `done`**: a run that ends naturally with no tool call and no
+  text (a thinking-only turn the existing empty-turn nudge could not rescue) was classified as a successful
+  completion, so the planner treated the direction as covered and the task could stall with nothing found. It is now
+  classified `exhausted`, like a turn-limit hit, so the planner re-approaches. Only the classification half of
+  upstream `artex-global` #72 is taken: the re-prompt already exists here, so no agent prompt changes.
 - **Stored credentials are bound to the address they were saved for**: the LLM connection test and the model-list
   endpoint fell back to a stored profile key (or the global key) against whatever base URL and proxy the request
   named, so anyone holding a session could send the stored key to a server they control. A stored key is now used
