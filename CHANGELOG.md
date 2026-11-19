@@ -17,6 +17,12 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
 
 ### Security hardening
 
+- **Path handling hardened at the point of use** (code-scanning `go/path-injection` and `go/zipslip` alerts): every
+  skill-directory join now goes through `joinWithin`, an independent `filepath.IsLocal` / `Rel` containment check
+  (rejecting `.`, `..` and absolute paths), on top of the existing name whitelists; skill-upload and task-archive
+  extraction use it too. Found while triaging: a recorded traffic host of `.` or `..` mapped onto the traffic
+  directory or its parent (`sanitize` only replaced separators), so a host-delete could target the wrong directory;
+  those two names are now neutralised. Tests added for both.
 - **Go dependency vulnerabilities fixed** (`govulncheck` now reports none): `klauspost/compress` v1.18.7 -> v1.20.2
   (GO-2026-6865, reachable from the self-update archive handling), `andybalholm/brotli` v1.2.1 -> v1.2.7
   (GO-2026-6888) and `golang.org/x/crypto` v0.58.0 -> v0.59.0 (GO-2026-5932), plus the `x/*` modules they pull in.

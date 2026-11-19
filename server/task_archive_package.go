@@ -693,7 +693,7 @@ func extractTaskArchivePackage(path, expectedSHA, destination string) error {
 		}
 		total += header.Size
 		clean := filepath.Clean(filepath.FromSlash(header.Name))
-		if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		if clean == "." || !filepath.IsLocal(clean) || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("unsafe task archive path %q", header.Name)
 		}
 		target := filepath.Join(destination, clean)
