@@ -249,3 +249,60 @@ func TestRenderTemplateIdentityKeepsJSONBody(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// A tool's own headers must not follow a redirect to another host; they do follow a
+// same-host redirect.
+func TestRedirectDropHeadersCrossHost(t *testing.T) {
+	var got http.Header
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+	}))
+	defer other.Close()
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/landing", http.StatusFound)
+	}))
+	defer first.Close()
+
+	hdrs := map[string]string{"X-Api-Key": "secret-token"}
+	req, _ := http.NewRequest("GET", first.URL, nil)
+	req.Header.Set("X-Api-Key", "secret-token")
+	req.Header.Set("Accept", "application/json")
+	client := &http.Client{CheckRedirect: redirectDropHeaders(hdrs)}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got == nil {
+		t.Fatal("redirect target was not reached")
+	}
+	if got.Get("X-Api-Key") != "" {
+		t.Fatalf("configured header leaked to the other host: %q", got.Get("X-Api-Key"))
+	}
+	if got.Get("Accept") != "application/json" {
+		t.Fatal("unrelated headers should be kept")
+	}
+}
+
+func TestRedirectDropHeadersSameHostKeeps(t *testing.T) {
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/start" {
+			http.Redirect(w, r, "/landing", http.StatusFound)
+			return
+		}
+		got = r.Header.Clone()
+	}))
+	defer srv.Close()
+	req, _ := http.NewRequest("GET", srv.URL+"/start", nil)
+	req.Header.Set("X-Api-Key", "secret-token")
+	client := &http.Client{CheckRedirect: redirectDropHeaders(map[string]string{"X-Api-Key": ""})}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got.Get("X-Api-Key") != "secret-token" {
+		t.Fatal("same-host redirect should keep the header")
+	}
+}

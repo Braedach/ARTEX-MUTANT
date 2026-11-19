@@ -17,6 +17,11 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
 
 ### Security hardening
 
+- **A custom HTTP tool's own headers no longer follow a redirect to another host**: `net/http` strips only
+  `Authorization` and `Cookie` across hosts and copies every other header, so an API key in a custom header would be
+  handed to wherever the server redirected. The tool's configured headers are now dropped when a redirect leaves the
+  original host (same-host redirects keep them). Notification channels already refused cross-host redirects. Idea
+  taken from the redirect rule in `wufufu770/reArtex`'s `netguard`; implemented fresh here with tests.
 - **A worker run that did nothing is no longer recorded as `done`**: a run that ends naturally with no tool call and no
   text (a thinking-only turn the existing empty-turn nudge could not rescue) was classified as a successful
   completion, so the planner treated the direction as covered and the task could stall with nothing found. It is now
