@@ -24,6 +24,11 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
   value is never re-scanned, so it cannot inject another parameter. HTTP/JSON templates are unchanged. Identified
   upstream (`artex-global` #69, open); implemented fresh here, shell-only, with tests that run the result through
   a real shell.
+- **Unreadable intercept rules now fail toward a human**, not toward allow: when the rule set cannot be loaded
+  (for example a database hiccup), `Match` returns an `ask` decision instead of "no rule matched", which the guard
+  previously turned into default-allow for the mandatory-floor tools. With the database still down the approval
+  itself fails closed. This closes the failure mode the earlier load-failure logging (#5) only made visible.
+  Independently identified upstream (`artex-global` #53); implemented fresh here with its own tests.
 
 ## [0.2.0] · 2026-11-03 · ARTEX-MUTANT hardening & cleanup release
 
