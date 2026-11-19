@@ -17,6 +17,11 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
 
 ### Security hardening
 
+- **A custom HTTP tool's own headers no longer follow a redirect to another host**: `net/http` strips only
+  `Authorization` and `Cookie` across hosts and copies every other header, so an API key in a custom header would be
+  handed to wherever the server redirected. The tool's configured headers are now dropped when a redirect leaves the
+  original host (same-host redirects keep them). Notification channels already refused cross-host redirects. Idea
+  taken from the redirect rule in `wufufu770/reArtex`'s `netguard`; implemented fresh here with tests.
 - **Host deletion can no longer move the traffic store's internal directories**: a recorded host is attacker-influenced,
   and host deletion moves the matching per-host directory aside. A host named `_blobs`, `_ca`, `_index` or
   `_delete_staging` mapped onto the proxy's own blob store, CA directory or index. Host directories now come from one
