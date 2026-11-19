@@ -1537,10 +1537,16 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// API Key 解析优先级：表单输入 > 指定 profile 存的 key > 全局配置的 key。
 	// 已存 profile 的 key 不回传浏览器，所以测试已存配置时表单为空，需从 DB 取。
 	// 会话头名同理：表单未带时用已存 profile 的值兜底。
+	keyRefused := false
 	if req.ProfileID != nil && (cfg.APIKey == "" || cfg.SessionHeaderKey == "") {
 		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
 			if cfg.APIKey == "" {
-				cfg.APIKey = p.APIKey
+				// A stored key is only used against the address and proxy it was saved with.
+				if sameLLMEndpoint(req.BaseURL, req.Proxy, p.BaseURL, p.Proxy) {
+					cfg.APIKey = p.APIKey
+				} else {
+					keyRefused = true
+				}
 			}
 			if cfg.SessionHeaderKey == "" {
 				cfg.SessionHeaderKey = p.SessionHeaderKey
@@ -1549,10 +1555,18 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	}
 	if cfg.APIKey == "" {
 		s.cfgMu.Lock()
-		cfg.APIKey = s.llmCfg.APIKey
+		if sameLLMEndpoint(req.BaseURL, req.Proxy, s.llmCfg.BaseURL, s.llmCfg.Proxy) {
+			cfg.APIKey = s.llmCfg.APIKey
+		} else if s.llmCfg.APIKey != "" {
+			keyRefused = true
+		}
 		s.cfgMu.Unlock()
 	}
 	if cfg.APIKey == "" {
+		if keyRefused {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": errStoredKeyOtherEndpoint})
+			return
+		}
 		writeJSON(w, 200, map[string]any{"ok": false, "error": trMsg(errLLMTestNoAPIKey)})
 		return
 	}
