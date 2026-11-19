@@ -23,6 +23,9 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
   extraction use it too. Found while triaging: a recorded traffic host of `.` or `..` mapped onto the traffic
   directory or its parent (`sanitize` only replaced separators), so a host-delete could target the wrong directory;
   those two names are now neutralised. Tests added for both.
+- **Go dependency vulnerabilities fixed** (`govulncheck` now reports none): `klauspost/compress` v1.18.7 -> v1.20.2
+  (GO-2026-6865, reachable from the self-update archive handling), `andybalholm/brotli` v1.2.1 -> v1.2.7
+  (GO-2026-6888) and `golang.org/x/crypto` v0.58.0 -> v0.59.0 (GO-2026-5932), plus the `x/*` modules they pull in.
 - **Platform secrets are off-limits to the agent's file tools** (new `pathguard` package): `Read`, `Write`, `Edit`,
   `MultiEdit`, `LS`, `Glob` and `Grep` can no longer reach the JWT signing key, the MITM CA directory, the container
   env file, `/run/secrets`, or `/proc/<pid>/{environ,cmdline,mem,maps,mounts}`. Symlinks (including a symlinked
