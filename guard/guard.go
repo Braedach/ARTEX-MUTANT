@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/intercept"
+	"github.com/Autumn-27/artex/pathguard"
 	"github.com/Autumn-27/norma/hook"
 )
 
@@ -55,6 +56,17 @@ func newGuard(ic *intercept.Interceptor) *Guard {
 func (g *Guard) Hooks() *hook.Registry { return g.reg }
 
 func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
+	// ARTEX-MUTANT hardening: platform secrets are off-limits to the file tools
+	// regardless of any intercept rule or judge verdict (see pathguard's package
+	// comment). Checked first and never stored in the database.
+	if err := pathguard.Check(ev.ToolName, ev.Input, intercept.WorkingDir(ctx)); err != nil {
+		if g.interceptor != nil {
+			g.interceptor.Log(ctx, intercept.ConvIDFromContext(ctx), intercept.Decision{
+				RuleName: "platform-secret-path-guard", Action: "deny", Message: err.Error(),
+			}, ev.ToolName, ev.Input, "denied")
+		}
+		return g.block(ev.ToolName, systemBlockMessage(err.Error()), "")
+	}
 	// Extract the shell-command surface for the audit log: Bash + the interactive-shell
 	// tools (shell_open's command, shell_send's text). Destructive/exfil gating is no
 	// longer hard-coded here — it now lives in the DB intercept rules, evaluated by
