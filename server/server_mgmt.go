@@ -2102,12 +2102,22 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 	}
 	// Resolve API key: form input > profile stored key.
 	apiKey := strings.TrimSpace(req.APIKey)
+	keyRefused := false
 	if apiKey == "" && req.ProfileID != nil {
 		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
-			apiKey = p.APIKey
+			// A stored key is only used against the address and proxy it was saved with.
+			if sameLLMEndpoint(req.BaseURL, req.Proxy, p.BaseURL, p.Proxy) {
+				apiKey = p.APIKey
+			} else {
+				keyRefused = true
+			}
 		}
 	}
 	if apiKey == "" {
+		if keyRefused {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": errStoredKeyOtherEndpoint})
+			return
+		}
 		writeJSON(w, 200, map[string]any{"ok": false, "error": errMgmtNoAPIKey})
 		return
 	}

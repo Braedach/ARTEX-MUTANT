@@ -204,8 +204,34 @@ func readSSEEndpoint(r *bufio.Reader, base string) (string, error) {
 			}
 			candidate = b.ResolveReference(u).String()
 		}
+		// ARTEX-MUTANT hardening: the legacy SSE transport lets the server announce
+		// the POST endpoint. An absolute URL on another origin would send this
+		// client's configured headers (usually an Authorization token) and every
+		// JSON-RPC request to a host the operator never configured, so a hostile or
+		// compromised MCP server could redirect the credentials. Require the same
+		// origin as the connection the operator configured.
+		if err := sameOrigin(base, candidate); err != nil {
+			return "", fmt.Errorf("mcp sse endpoint: %w", err)
+		}
 		return candidate, nil
 	}
+}
+
+// sameOrigin reports an error unless target has the same scheme and host:port as base.
+func sameOrigin(base, target string) error {
+	b, err := url.Parse(base)
+	if err != nil {
+		return err
+	}
+	t, err := url.Parse(target)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(b.Scheme, t.Scheme) || !strings.EqualFold(b.Host, t.Host) {
+		return fmt.Errorf("announced endpoint %s://%s is not the configured origin %s://%s",
+			t.Scheme, t.Host, b.Scheme, b.Host)
+	}
+	return nil
 }
 
 func (c *Client) readLegacySSE(r *bufio.Reader) {
