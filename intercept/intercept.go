@@ -673,6 +673,13 @@ func judgeActionLabel(action string) string {
 	return action
 }
 
+// ruleLoadFailureRuleName / ruleLoadFailureMessage describe the synthetic ask
+// decision Match returns when the intercept rules cannot be read.
+const (
+	ruleLoadFailureRuleName = "intercept-rules-unavailable"
+	ruleLoadFailureMessage  = "Intercept rules could not be loaded; manual approval is required."
+)
+
 // Match evaluates the rule list (priority DESC) against a tool call.
 // Returns (Decision, true) for the first matching enabled rule, or
 // (Decision{}, false) if no rule matches.
@@ -682,7 +689,22 @@ func judgeActionLabel(action string) string {
 // resolved form, not only its literal text - see ruleMatches' own comment.
 func (i *Interceptor) Match(ctx context.Context, toolName string, input []byte) (Decision, bool) {
 	rules, err := i.rules()
-	if err != nil || len(rules) == 0 {
+	if err != nil {
+		// ARTEX-MUTANT hardening: an unreadable rule set must not read as "no
+		// rule matched" - the guard turns that into default-allow, so a DB
+		// hiccup would silently drop every deny/ask rule for the mandatory
+		// floor tools. Fail toward a human instead: HandleAsk itself fails
+		// closed when the database is still down (no pending record can be
+		// created), so a sustained outage denies and a transient one asks.
+		// Independently identified upstream (artex-global #53); implemented
+		// fresh here with its own tests.
+		return Decision{
+			RuleName: ruleLoadFailureRuleName,
+			Action:   "ask",
+			Message:  ruleLoadFailureMessage,
+		}, true
+	}
+	if len(rules) == 0 {
 		return Decision{}, false
 	}
 	workingDir := workingDirFromContext(ctx)
