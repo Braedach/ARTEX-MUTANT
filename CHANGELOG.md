@@ -13,6 +13,18 @@ going forward. In particular, the localization entries there (Spanish, Japanese,
 release history (0.3.x and earlier) and contributor list are preserved verbatim in Chinese in
 `CHANGELOG.zh.md`, kept unchanged so it stays easy to compare against upstream.
 
+## [Unreleased]
+
+### Security hardening
+
+- **Platform secrets are off-limits to the agent's file tools** (new `pathguard` package): `Read`, `Write`, `Edit`,
+  `MultiEdit`, `LS`, `Glob` and `Grep` can no longer reach the JWT signing key, the MITM CA directory, the container
+  env file, `/run/secrets`, or `/proc/<pid>/{environ,cmdline,mem,maps,mounts}`. Symlinks (including a symlinked
+  parent of a new file) and relative paths are resolved before the check, and `Grep` over a directory that
+  contains a secret is refused. The list is compiled in and fed from the live key and data directories, never the
+  database, so a settings write cannot disable it. `Bash` stays with the intercept rules and the judge. Design
+  informed by the equivalent package in `wufufu770/reArtex`; implemented fresh here.
+
 ## [0.2.0] · 2026-11-03 · ARTEX-MUTANT hardening & cleanup release
 
 The first versioned release cut from this repository as its own, no-longer-upstream-tracking home (see
