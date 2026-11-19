@@ -1197,6 +1197,11 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	case reason == harness.ReasonTimeout:
 		state = "exhausted"
 		log.Printf("[worker %s] intent %d 运行超时(exhausted)，收尾后写回 %s", name, intent.ID, wrote)
+	case reason == agent.ReasonUnproductiveNoop:
+		// Thinking-only run: no tool call, no text. Not `done` - that would tell the
+		// planner the direction is covered and stall the task. Re-approach instead.
+		state = "exhausted"
+		log.Printf("[worker %s] intent %d 本轮未行动(仅思考，无工具无正文)，标记 exhausted", name, intent.ID)
 	}
 	if state == "blocked" && isTaskLLMChainExhausted(err) {
 		_ = t.Store.SetIntentBlockedReason(intent.ID, db.IntentBlockedLLMQuota)

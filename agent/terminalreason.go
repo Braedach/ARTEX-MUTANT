@@ -30,7 +30,25 @@ func (t *runTrace) done(id string) {
 	}
 }
 
+// ReasonUnproductiveNoop is an artex-internal terminal reason (never produced by the
+// SDK) for a worker run that ended naturally yet called no tool and left no final
+// text: a thinking-only no-op. The SDK reports that as ReasonCompleted, which marked
+// the intent `done` and told the planner the direction was covered, so a task could
+// stall quietly with nothing found. The engine records it as `exhausted` instead,
+// the same treatment as a turn-limit hit, so the planner re-approaches the direction.
+// Identified upstream (artex-global #72); only the classification half is taken here,
+// because the empty-turn re-prompt (emptyTurnNudge) already exists in this codebase.
+const ReasonUnproductiveNoop harness.TerminalReason = "unproductive_noop"
+
+// isUnproductiveNoop reports whether a finished worker run did literally nothing: it
+// ended naturally with no error, called no tool and produced no final text. A run
+// that called a tool, left any text, errored or ended for another reason is not one.
+func isUnproductiveNoop(reason harness.TerminalReason, err error, toolCalls int, finalText string) bool {
+	return err == nil && reason == harness.ReasonCompleted && toolCalls == 0 && strings.TrimSpace(finalText) == ""
+}
+
 var reasonHint = map[harness.TerminalReason]string{
+	ReasonUnproductiveNoop:          "模型只输出了思考、既没调用任何工具也没给出正文，整轮没有产出；意图标记为 exhausted，供规划者换方向而不是当作已覆盖",
 	harness.ReasonCompleted:         "模型正常结束了本轮，但没有留下文字总结；事实和资产以本轮工具调用记录为准",
 	harness.ReasonMaxTurns:          "达到步数上限(MaxTurns)：SDK 已执行收尾并写回事实和资产，意图会标记为 exhausted，供规划者换方向继续，而不是作为失败处理",
 	harness.ReasonTimeout:           "达到单次运行的墙钟预算(MaxDuration)：到点会打断在跑的工具并就地进收尾，把已识别的事实和资产写回，意图会标记为 exhausted",
