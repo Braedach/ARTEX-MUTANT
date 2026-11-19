@@ -17,6 +17,13 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
 
 ### Security hardening
 
+- **Platform secrets are off-limits to the agent's file tools** (new `pathguard` package): `Read`, `Write`, `Edit`,
+  `MultiEdit`, `LS`, `Glob` and `Grep` can no longer reach the JWT signing key, the MITM CA directory, the container
+  env file, `/run/secrets`, or `/proc/<pid>/{environ,cmdline,mem,maps,mounts}`. Symlinks (including a symlinked
+  parent of a new file) and relative paths are resolved before the check, and `Grep` over a directory that
+  contains a secret is refused. The list is compiled in and fed from the live key and data directories, never the
+  database, so a settings write cannot disable it. `Bash` stays with the intercept rules and the judge. Design
+  informed by the equivalent package in `wufufu770/reArtex`; implemented fresh here.
 - **Custom-tool command templates are escaped for their own quoting context**: a `{name}` placeholder the template
   wraps in double quotes (`echo "{target}"`) previously received a single-quoted value, where the value's `"`,
   `$(...)` and backticks stayed live and could close the template's quote and run a second command. Placeholders are

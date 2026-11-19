@@ -3,8 +3,11 @@ package guard
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/Autumn-27/artex/pathguard"
 	"github.com/Autumn-27/norma/hook"
 )
 
@@ -52,3 +55,28 @@ func TestSystemBlockMessagePreservedIsBrainInput(t *testing.T) {
 }
 
 var _ = hook.PreToolUse
+
+// TestPreToolUseBlocksPlatformSecretPath verifies the file-tool secret guard
+// fires from the hook, ahead of any intercept rule (no interceptor is wired here,
+// so nothing but pathguard can be responsible for the block).
+func TestPreToolUseBlocksPlatformSecretPath(t *testing.T) {
+	dir := t.TempDir()
+	key := filepath.Join(dir, "jwt.key")
+	if err := os.WriteFile(key, []byte("k"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pathguard.Reset()
+	pathguard.Protect(key)
+	t.Cleanup(pathguard.Reset)
+
+	g := New()
+	in, _ := json.Marshal(map[string]string{"file_path": key})
+	res := g.preToolUse(context.Background(), hook.Event{ToolName: "Read", Input: in})
+	if res.Decision != "block" {
+		t.Fatalf("Read of the signing key: decision %q, want block", res.Decision)
+	}
+	other, _ := json.Marshal(map[string]string{"file_path": filepath.Join(dir, "notes.txt")})
+	if res := g.preToolUse(context.Background(), hook.Event{ToolName: "Read", Input: other}); res.Decision == "block" {
+		t.Fatal("an ordinary path was blocked")
+	}
+}
