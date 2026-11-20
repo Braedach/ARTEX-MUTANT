@@ -1,5 +1,9 @@
-const TOKEN_KEY = "artex_token";
-const COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 天（秒）
+// Session handling for the web UI.
+//
+// The login token is an HttpOnly cookie that the server sets and clears. Page script
+// never sees it, so nothing here stores, reads or sends a token: the browser attaches
+// the cookie to same-origin requests (fetch and EventSource) by itself, and the UI
+// learns whether it is signed in by asking the server.
 
 export interface CurrentUser {
   id: string;
@@ -10,37 +14,62 @@ export interface CurrentUser {
   role: string;
 }
 
+export interface Session {
+  authenticated: boolean;
+  username?: string;
+}
+
+const LEGACY_TOKEN_KEY = "artex_token";
+
+const isMock = () => process.env.NEXT_PUBLIC_MOCK === "1";
+
+// Earlier versions kept the JWT in localStorage and in a cookie written by script, where
+// any script on the page could read it. Remove those copies. If the cookie is still the
+// script-written one, deleting it signs the user out once; if it is already the server's
+// HttpOnly cookie the browser ignores the script's delete, so nothing changes.
+export function purgeLegacyToken(): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (window.localStorage.getItem(LEGACY_TOKEN_KEY) === null) return;
+    window.localStorage.removeItem(LEGACY_TOKEN_KEY);
+    document.cookie = `${LEGACY_TOKEN_KEY}=; path=/; max-age=0`;
+  } catch {
+    // Storage can be blocked (private mode); there is nothing stored to remove then.
+  }
+}
+
 export const auth = {
-  getToken(): string | null {
-    if (typeof window === "undefined") return null;
-    // Mock demo：无真实登录，返回一个假 token 让路由守卫放行、直接进主界面。
-    return localStorage.getItem(TOKEN_KEY) ?? (process.env.NEXT_PUBLIC_MOCK === "1" ? "mock-demo" : null);
-  },
-
-  setToken(token: string): void {
-    localStorage.setItem(TOKEN_KEY, token);
-    // 同步写 cookie，供 Next.js middleware 服务端读取
-    document.cookie = `${TOKEN_KEY}=${encodeURIComponent(token)}; path=/; max-age=${COOKIE_MAX_AGE}; SameSite=Lax`;
-  },
-
-  clearToken(): void {
-    localStorage.removeItem(TOKEN_KEY);
-    document.cookie = `${TOKEN_KEY}=; path=/; max-age=0`;
-  },
-
-  // 从 JWT payload 的 sub 字段解析当前用户，仅用于展示，不做签名验证。
-  getCurrentUser(): CurrentUser | null {
-    const token = this.getToken();
-    if (!token) return null;
+  // Asks the server whether the browser holds a valid session. A network failure
+  // reads as "not signed in", the same outcome a 401 used to have.
+  async session(): Promise<Session> {
+    if (isMock()) return { authenticated: true, username: "ARTEX" };
+    purgeLegacyToken();
     try {
-      const parts = token.split(".");
-      if (parts.length !== 3) return null;
-      // base64url → base64
-      const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
-      const username: string = payload.sub ?? "ARTEX";
-      return { id: "1", name: username, username, email: "", avatar: "", role: "operator" };
+      const r = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
+      if (!r.ok) return { authenticated: false };
+      const body = (await r.json()) as Partial<Session>;
+      return { authenticated: body.authenticated === true, username: body.username };
     } catch {
-      return null;
+      return { authenticated: false };
     }
   },
+
+  // Ends the browser session. Only the server can clear an HttpOnly cookie, so this
+  // must reach it; a failure is swallowed so the caller can still leave the page, and
+  // the cookie then simply expires on its own.
+  async logout(): Promise<void> {
+    if (isMock()) return;
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+    } catch {
+      // The session cookie expires with the token.
+    }
+    purgeLegacyToken();
+  },
 };
+
+// Display name for the signed-in user. The server has one admin account.
+export function userFromSession(session: Session): CurrentUser {
+  const username = session.username ?? "ARTEX";
+  return { id: "1", name: username, username, email: "", avatar: "", role: "operator" };
+}

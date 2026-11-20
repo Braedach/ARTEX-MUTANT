@@ -47,8 +47,12 @@ func newAuthTestRig(t *testing.T) *authTestRig {
 	mux.HandleFunc("POST /api/auth/init", s.authInit)
 	mux.HandleFunc("POST /api/auth/login", s.authLogin)
 	mux.HandleFunc("POST /api/auth/change-password", s.authChangePassword)
+	mux.HandleFunc("POST /api/auth/logout", s.authLogout)
+	mux.HandleFunc("GET /api/auth/session", s.authSession)
 	mux.HandleFunc("GET /api/ping", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	return &authTestRig{t: t, s: s, h: s.requireAuth(mux)}
+	mux.HandleFunc("POST /api/ping", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	// Same chain as production: CORS, CSRF guard, JWT.
+	return &authTestRig{t: t, s: s, h: cors(csrfGuard(corsAllowedOrigins(), s.requireAuth(mux)))}
 }
 
 func (r *authTestRig) do(method, path, token string, body map[string]any) (int, map[string]any) {
