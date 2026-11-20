@@ -1,24 +1,45 @@
 package server
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 )
 
-func TestExtractTokenQueryOnlyForEventStream(t *testing.T) {
-	r := httptest.NewRequest("GET", "/api/tasks?token=abc", nil)
-	if got := extractToken(r); got != "" {
-		t.Fatalf("query token accepted on a plain request: %q", got)
+// A token in the URL is never accepted, not even on an event stream: the web UI's
+// EventSource sends the HttpOnly session cookie by itself.
+func TestExtractTokenIgnoresQueryString(t *testing.T) {
+	for _, tc := range []struct{ method, target, accept string }{
+		{"GET", "/api/tasks?token=abc", ""},
+		{"GET", "/api/logs/stream?token=abc", "text/event-stream"},
+		{"POST", "/api/tasks?token=abc", "text/event-stream"},
+	} {
+		r := httptest.NewRequest(tc.method, tc.target, nil)
+		if tc.accept != "" {
+			r.Header.Set("Accept", tc.accept)
+		}
+		if got := extractToken(r); got != "" {
+			t.Fatalf("%s %s: query token accepted: %q", tc.method, tc.target, got)
+		}
 	}
-	r = httptest.NewRequest("GET", "/api/logs/stream?token=abc", nil)
-	r.Header.Set("Accept", "text/event-stream")
-	if got := extractToken(r); got != "abc" {
-		t.Fatalf("query token rejected on an event stream: %q", got)
+}
+
+func TestExtractTokenSources(t *testing.T) {
+	r := httptest.NewRequest("GET", "/api/x", nil)
+	r.Header.Set("Authorization", "Bearer from-header")
+	r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "from-cookie"})
+	if got := extractToken(r); got != "from-header" {
+		t.Fatalf("header should win: %q", got)
 	}
-	r = httptest.NewRequest("POST", "/api/tasks?token=abc", nil)
-	r.Header.Set("Accept", "text/event-stream")
+	r = httptest.NewRequest("GET", "/api/x", nil)
+	r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "from-cookie"})
+	if got := extractToken(r); got != "from-cookie" {
+		t.Fatalf("cookie not read: %q", got)
+	}
+	r = httptest.NewRequest("GET", "/api/x", nil)
+	r.Header.Set("Authorization", "Basic abc")
 	if got := extractToken(r); got != "" {
-		t.Fatalf("query token accepted on POST: %q", got)
+		t.Fatalf("non-bearer scheme accepted: %q", got)
 	}
 }
 

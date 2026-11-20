@@ -118,26 +118,24 @@ export class ApiError extends Error {
   }
 }
 
-function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("artex_token");
-}
-
 export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   if (MOCK) return mockHandle<T>(init?.method ?? "GET", path, init?.body ?? null);
-  const token = getToken();
+  // No token handling here: the HttpOnly session cookie travels with the request.
   const r = await fetch(`/api${path}`, {
     ...init,
+    credentials: "same-origin",
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers as Record<string, string> | undefined),
     },
   });
-  if (r.status === 401) {
+  // A 401 from the auth endpoints themselves (wrong password, bad setup token) is an
+  // answer for the form to show, not an expired session.
+  if (r.status === 401 && !path.startsWith("/auth/")) {
     if (typeof window !== "undefined") {
-      localStorage.removeItem("artex_token");
-      document.cookie = "artex_token=; path=/; max-age=0";
+      // Ask the server to clear the cookie before leaving: it is HttpOnly, and a stale
+      // cookie would send the dev proxy straight back from /login to the app.
+      await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" }).catch(() => undefined);
       window.location.href = "/login";
     }
     throw new Error("인증되지 않았습니다");
@@ -174,7 +172,7 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
 // to the Go backend on :8787, whose CORS is open.
 //
 // Override either default with NEXT_PUBLIC_SSE_BASE (set it to "" to force same-origin).
-// Token is appended as ?token= because SSE can't carry cookies cross-origin.
+// No token is appended: authentication is the HttpOnly session cookie (see openEventSource).
 // mockReport returns a canned Markdown report for the demo.
 function mockReport(_task?: string): string {
   return `# ARTEX 침투 테스트 보고서: Acme Corp
@@ -204,9 +202,14 @@ export function sseUrl(path: string): string {
     (process.env.NODE_ENV !== "production" && typeof window !== "undefined"
       ? `${window.location.protocol}//${window.location.hostname}:8787`
       : "");
-  const token = getToken();
-  const sep = path.includes("?") ? "&" : "?";
-  return token ? `${base}${path}${sep}token=${encodeURIComponent(token)}` : `${base}${path}`;
+  return `${base}${path}`;
+}
+
+// Opens a Server-Sent Events stream. The session cookie is HttpOnly, so no token is put
+// in the URL; same-origin streams send the cookie automatically, and withCredentials
+// makes the dev setup (frontend and backend on different ports) send it too.
+export function openEventSource(path: string): EventSource {
+  return new EventSource(sseUrl(path), { withCredentials: true });
 }
 
 const get = <T>(p: string) => http<T>(p);
@@ -460,10 +463,8 @@ export const api = {
     if (MOCK) return { uploaded: files.length };
     const fd = new FormData();
     for (const f of files) fd.append("file", f);
-    const token = getToken();
     const r = await fetch(`/api/workspace/upload?path=${encodeURIComponent(dir)}`, {
       method: "POST",
-      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: fd,
     });
     if (!r.ok) throw new Error(`업로드 실패: ${r.status}`);
@@ -474,10 +475,7 @@ export const api = {
     if (MOCK) {
       blob = new Blob([`(demo) ${path} 의 다운로드 내용 예시입니다.`], { type: "text/plain" });
     } else {
-      const token = getToken();
-      const r = await fetch(`/api/workspace/download?path=${encodeURIComponent(path)}`, {
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      });
+      const r = await fetch(`/api/workspace/download?path=${encodeURIComponent(path)}`);
       if (!r.ok) throw new Error(`다운로드 실패: ${r.status}`);
       blob = await r.blob();
     }
@@ -588,10 +586,7 @@ export const api = {
     } else if (opts.scope === "filtered" && opts.filters) {
       for (const [k, v] of findingFilterParams(opts.filters)) p.set(k, v);
     }
-    const token = getToken();
-    const r = await fetch(`/api/exploration/findings/export?${p.toString()}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    const r = await fetch(`/api/exploration/findings/export?${p.toString()}`);
     if (!r.ok) throw new Error(`export: ${r.status}`);
     const blob = await r.blob();
     // 文件名优先取后端 Content-Disposition,取不到则用默认名。
@@ -661,10 +656,8 @@ export const api = {
     side: "request" | "response",
     contextTask?: string,
   ) => {
-    const token = getToken();
     const response = await fetch(
       `/api/exploration/findings/${id}/traffic/${bindingId}/body?side=${side}&download=1${contextTask ? `&context_task=${encodeURIComponent(contextTask)}` : ""}`,
-      { headers: token ? { Authorization: `Bearer ${token}` } : {} },
     );
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: "다운로드 실패" }));
@@ -882,10 +875,7 @@ export const api = {
   notifyRetryDelivery: (id: number) => post<{ ok: boolean }>(`/notify/deliveries/${id}/retry`),
   report: async (task?: string) => {
     if (MOCK) return mockReport(task);
-    const token = getToken();
-    const r = await fetch(`/api/report${tq(task)}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    const r = await fetch(`/api/report${tq(task)}`);
     if (!r.ok) throw new Error(`report: ${r.status}`);
     return r.text();
   },
@@ -910,10 +900,8 @@ export const api = {
       };
     const fd = new FormData();
     for (const f of files) fd.append("file", f);
-    const token = getToken();
     const r = await fetch(`/api/chat/upload?scope=${scope}&id=${encodeURIComponent(id)}`, {
       method: "POST",
-      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: fd,
     });
     if (!r.ok) throw new Error(`업로드 실패: ${r.status} ${await r.text()}`);
@@ -1170,11 +1158,9 @@ export const api = {
     if (MOCK) return { name: file.name.replace(/\.zip$/i, ""), files: 1 };
     const fd = new FormData();
     fd.append("file", file);
-    const token = getToken();
     const r = await fetch(`/api/skills/upload${overwrite ? "?overwrite=true" : ""}`, {
       method: "POST",
       body: fd,
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     const body = await r.json().catch(() => ({}));
     if (!r.ok) throw new ApiError(body?.error || `업로드 실패(${r.status})`, r.status);
@@ -1259,22 +1245,15 @@ export const api = {
   // ---- intercept tool-config (全局工具拦截范围) ----
   interceptGetToolConfig: async (): Promise<{ enabled_tools: string[] }> => {
     if (MOCK) return { enabled_tools: ["bash"] };
-    const token = getToken();
-    const r = await fetch("/api/intercept/tool-config", {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    const r = await fetch("/api/intercept/tool-config");
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   },
   interceptSetToolConfig: async (enabledTools: string[]): Promise<void> => {
     if (MOCK) return;
-    const token = getToken();
     const r = await fetch("/api/intercept/tool-config", {
       method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled_tools: enabledTools }),
     });
     if (!r.ok) throw new Error(await r.text());

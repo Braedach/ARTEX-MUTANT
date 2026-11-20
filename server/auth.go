@@ -440,20 +440,16 @@ func (s *Server) WarnIfExposed(addr string) {
 	log.Printf(logT("[auth] 경고: 관리자 비밀번호가 아직 설정되지 않았는데 서버가 %q 에 바인딩되어 다른 호스트에서도 접속할 수 있습니다. 설정 토큰 없이는 초기화할 수 없지만, 초기 설정을 마칠 때까지 이 포트를 외부 네트워크에 노출하지 마십시오(기본값 127.0.0.1:8787)"), addr)
 }
 
-// extractToken reads the JWT from Authorization: Bearer header,
-// artex_token cookie, or ?token= query param (for SSE connections).
+// extractToken reads the JWT from the Authorization: Bearer header (API clients) or
+// the HttpOnly session cookie (the web UI). A token in the URL is NOT accepted: it
+// would leak through access logs, proxies and the Referer header, and the cookie is
+// sent automatically on same-origin EventSource streams, so the UI does not need it.
 func extractToken(r *http.Request) string {
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
-	if c, err := r.Cookie("artex_token"); err == nil && c.Value != "" {
+	if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
 		return c.Value
-	}
-	// ?token= is accepted only for EventSource streams (the browser cannot set
-	// headers on those). Elsewhere a URL token would leak through access logs,
-	// proxies and the Referer header.
-	if r.Method == http.MethodGet && strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
-		return r.URL.Query().Get("token")
 	}
 	return ""
 }
@@ -583,6 +579,7 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf(logT("[auth] 관리자 비밀번호를 초기화했습니다 (client=%s)"), clientLogID(r))
+	setSessionCookie(w, r, tok)
 	writeJSON(w, 200, map[string]any{"token": tok})
 }
 
@@ -657,6 +654,7 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf(logT("[auth] 관리자 비밀번호를 변경했습니다. 기존 세션은 모두 무효화됩니다 (client=%s)"), clientLogID(r))
+	setSessionCookie(w, r, tok)
 	writeJSON(w, 200, map[string]any{"ok": true, "token": tok})
 }
 
@@ -704,5 +702,6 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, authErrTokenGen)
 		return
 	}
+	setSessionCookie(w, r, tok)
 	writeJSON(w, 200, map[string]any{"token": tok})
 }

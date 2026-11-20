@@ -34,15 +34,22 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
   // protected UI (or its API calls) flashes for a logged-out visitor.
   const [authed, setAuthed] = React.useState(false);
   React.useEffect(() => {
-    if (auth.getToken()) {
-      setAuthed(true);
-    } else {
-      // 客户端守卫认为未登录时，必须同时清掉 cookie：否则 proxy.ts 仅凭
+    let cancelled = false;
+    void auth.session().then(async (session) => {
+      if (cancelled) return;
+      if (session.authenticated) {
+        setAuthed(true);
+        return;
+      }
+      // 客户端守卫认为未登录时，必须让服务端同时清掉 cookie：否则 proxy.ts 仅凭
       // “cookie 存在”就把我们从 /login 又重定向回主界面，与本守卫来回弹跳
-      // 形成无限重定向 → 白屏（cookie 与 localStorage 不一致时触发）。
-      auth.clearToken();
+      // 形成无限重定向 → 白屏。cookie 是 HttpOnly，只有服务端能清除它。
+      await auth.logout();
       window.location.href = "/login";
-    }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const defaultOpen = typeof document === "undefined" ? true : getClientCookie("sidebar_state") !== "false";

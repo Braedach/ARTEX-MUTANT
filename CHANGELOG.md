@@ -17,6 +17,24 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
 
 ### Security hardening
 
+- **The login token is no longer readable by page script** (code-scanning `js/clear-text-storage-of-sensitive-data`,
+  and the accepted risk recorded in the maintainer's security review). The JWT used to sit in `localStorage` and in a
+  cookie written by JavaScript, so any script on the page (an XSS, a malicious dependency) could steal an admin
+  session. The server now sets it as an `HttpOnly`, `SameSite=Strict` cookie (`Secure` whenever the request arrived
+  over HTTPS or through a proxy that says so); the web UI stores and sends nothing and asks `GET /api/auth/session`
+  whether it is signed in. New `POST /api/auth/logout` clears the cookie (only the server can, since it is
+  `HttpOnly`). Because the cookie is now the browser's credential, state-changing requests that rely on it are
+  refused unless same-origin (`Sec-Fetch-Site`, with `Origin` as fallback; an explicitly trusted CORS origin is
+  allowed), which also closes the same-site/sibling-port CSRF case `SameSite` alone does not cover. Credentialed
+  CORS is granted only to explicitly listed origins, never through `*`. Existing browsers are migrated: the old
+  `localStorage` token and script-written cookie are removed once, which signs those sessions out a single time.
+  **Breaking for scripts:** a `?token=` query parameter is no longer accepted anywhere, including event streams
+  (it leaked through logs, proxies and Referer); send `Authorization: Bearer <token>`, which still works, or the
+  cookie. Login, init and change-password responses still include the token for such clients. Tested with new Go
+  tests against a real database (cookie flags, Secure behind a proxy, no cookie on failed login, URL token refused,
+  session and logout endpoints, password change re-issuing the cookie and revoking old sessions, a CSRF matrix,
+  CORS credentials), new web tests, and an end-to-end run of the real server and embedded UI in a browser,
+  including a cross-site navigation and a same-site form POST attack.
 - **A custom HTTP tool's own headers no longer follow a redirect to another host**: `net/http` strips only
   `Authorization` and `Cookie` across hosts and copies every other header, so an API key in a custom header would be
   handed to wherever the server redirected. The tool's configured headers are now dropped when a redirect leaves the

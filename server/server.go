@@ -772,6 +772,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/init", s.authInit)
 	mux.HandleFunc("POST /api/auth/login", s.authLogin)
 	mux.HandleFunc("POST /api/auth/change-password", s.authChangePassword)
+	mux.HandleFunc("POST /api/auth/logout", s.authLogout)
+	mux.HandleFunc("GET /api/auth/session", s.authSession)
 
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/stats", s.stats)
@@ -1052,7 +1054,7 @@ func (s *Server) Handler() http.Handler {
 	// /api/* goes through CORS + JWT; everything else is served by the embedded
 	// frontend (public — auth is enforced client-side and on the API). With the
 	// no-embed build the webui handler just 404s (run `next dev` separately).
-	api := cors(s.requireAuth(mux))
+	api := cors(csrfGuard(corsAllowedOrigins(), s.requireAuth(mux)))
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
 	root.Handle("/", s.webuiHandler())
@@ -4123,6 +4125,12 @@ func corsWith(allowed map[string]bool, next http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
 				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+				// The session cookie is HttpOnly, so a cross-origin dev frontend can only
+				// use it with credentialed requests. Credentials are allowed solely for an
+				// origin that is listed explicitly, never through the "*" wildcard.
+				if allowed[strings.ToLower(origin)] {
+					w.Header().Set("Access-Control-Allow-Credentials", "true")
+				}
 			}
 		}
 		if r.Method == http.MethodOptions {
