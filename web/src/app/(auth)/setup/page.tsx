@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
-import { auth } from "@/lib/auth";
 
 export default function SetupPage() {
   const router = useRouter();
@@ -56,8 +55,8 @@ export default function SetupPage() {
     setLoading(true);
     setError("");
     try {
-      const { token } = await api.initPassword(password, setupToken.trim());
-      auth.setToken(token);
+      // The server signs us in with an HttpOnly session cookie in this response.
+      await api.initPassword(password, setupToken.trim());
       router.replace("/function/tasks");
     } catch (err) {
       setError(err instanceof Error ? err.message : t("setup.errorInit"));

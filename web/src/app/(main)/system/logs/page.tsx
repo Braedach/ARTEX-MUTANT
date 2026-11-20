@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { sseUrl } from "@/lib/api";
+import { openEventSource } from "@/lib/api";
 import { MOCK } from "@/lib/mock/enabled";
 import type { LogLine } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -104,7 +104,7 @@ export default function LogsPage() {
       setLines(MOCK_LOGS);
       return;
     }
-    const es = new EventSource(sseUrl("/api/logs/stream?since=0"));
+    const es = openEventSource("/api/logs/stream?since=0");
     es.onmessage = (e) => {
       if (pausedRef.current) return;
       try {

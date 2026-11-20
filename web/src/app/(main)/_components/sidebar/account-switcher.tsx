@@ -33,8 +33,8 @@ export function AccountSwitcher({
   const [activeUser, setActiveUser] = useState(users[0]);
   const [pwOpen, setPwOpen] = useState(false);
 
-  function handleLogout() {
-    auth.clearToken();
+  async function handleLogout() {
+    await auth.logout(); // the session cookie is HttpOnly: only the server can clear it
     window.location.href = "/login";
   }
 

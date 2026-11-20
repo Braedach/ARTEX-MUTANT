@@ -17,7 +17,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
-import { auth } from "@/lib/auth";
 
 export function ChangePasswordDialog({
   open,
@@ -54,10 +53,9 @@ export function ChangePasswordDialog({
     setSaving(true);
     api
       .changePassword(oldPassword, newPassword)
-      .then((res) => {
-        // 비밀번호가 바뀌면 이전 토큰은 서버에서 모두 무효화된다. 응답의 새 토큰으로
-        // 현재 세션만 이어 가고, 다른 브라우저의 세션은 로그아웃된다.
-        if (res.token) auth.setToken(res.token);
+      .then(() => {
+        // 비밀번호가 바뀌면 이전 토큰은 서버에서 모두 무효화된다. 서버가 같은 응답에서 새
+        // HttpOnly 세션 쿠키를 발급하므로 현재 세션만 이어지고, 다른 브라우저는 로그아웃된다.
         toast.success(t("success"));
         onOpenChange(false);
       })
