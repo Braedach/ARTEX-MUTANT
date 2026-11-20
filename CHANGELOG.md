@@ -17,6 +17,11 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
 
 ### Security hardening
 
+- **Dependency alert cleared (`minimatch`, moderate denial of service)**: the vulnerable copy came in through the
+  `shadcn` build tool (`shadcn` -> `ts-morph` 26 -> `@ts-morph/common` -> `minimatch` 10). `shadcn` has not moved off
+  `ts-morph` 26 yet, so `web/package.json` now overrides it to `ts-morph` ^28, whose `@ts-morph/common` uses the
+  fixed `minimatch` 11. Build-time tooling only (nothing in the shipped app uses it); `npm audit` reports none.
+  Verified with a full `npm ci`, the static build, `vitest`, `biome`, `tsc`, and the `shadcn` CLI itself.
 - **The login token is no longer readable by page script** (code-scanning `js/clear-text-storage-of-sensitive-data`,
   and the accepted risk recorded in the maintainer's security review). The JWT used to sit in `localStorage` and in a
   cookie written by JavaScript, so any script on the page (an XSS, a malicious dependency) could steal an admin
