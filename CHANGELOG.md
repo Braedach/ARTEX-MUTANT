@@ -17,6 +17,11 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
 
 ### Security hardening
 
+- **Dependency alert cleared (`minimatch`, moderate denial of service)**: the vulnerable copy came in through the
+  `shadcn` build tool (`shadcn` -> `ts-morph` 26 -> `@ts-morph/common` -> `minimatch` 10). `shadcn` has not moved off
+  `ts-morph` 26 yet, so `web/package.json` now overrides it to `ts-morph` ^28, whose `@ts-morph/common` uses the
+  fixed `minimatch` 11. Build-time tooling only (nothing in the shipped app uses it); `npm audit` reports none.
+  Verified with a full `npm ci`, the static build, `vitest`, `biome`, `tsc`, and the `shadcn` CLI itself.
 - **A custom HTTP tool's own headers no longer follow a redirect to another host**: `net/http` strips only
   `Authorization` and `Cookie` across hosts and copies every other header, so an API key in a custom header would be
   handed to wherever the server redirected. The tool's configured headers are now dropped when a redirect leaves the
