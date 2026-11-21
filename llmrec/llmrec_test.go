@@ -130,3 +130,46 @@ FROM llm_usage WHERE profile_name=$1`, profile).Scan(&count, &input, &output, &w
 		}
 	}
 }
+
+// The per-task token budget (server/tokenbudget.go) rides on this hook, so pin that
+// it fires once per metered call, with the task id and the usage, after the ledger
+// row exists.
+func TestUsageHookReportsEachMeteredCall(t *testing.T) {
+	dsn := os.Getenv("ARTEX_PG_DSN")
+	if dsn == "" {
+		t.Skip("requires isolated ARTEX_PG_DSN")
+	}
+	pg, err := db.Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pg.Close()
+	if err := pg.EnsureLLMUsageTable(); err != nil {
+		t.Fatal(err)
+	}
+	type seen struct {
+		task string
+		u    llm.Usage
+	}
+	var got []seen
+	SetUsageHook(func(taskID string, u llm.Usage) { got = append(got, seen{taskID, u}) })
+	defer SetUsageHook(nil)
+
+	profile := "hook-" + uuid.NewString()
+	defer func() { _, _ = pg.Exec(`DELETE FROM llm_usage WHERE profile_name=$1`, profile) }()
+	ctx := transcript.WithSessionID(WithTaskID(t.Context(), "4242"), "exp1-worker-i1")
+	rec := Wrap(completeProvider{}, pg, "fixture", profile, "", "", func() bool { return false })
+	if _, _, _, err := rec.Complete(ctx, llm.CompletionRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].task != "4242" || got[0].u.InputTokens != 7 || got[0].u.OutputTokens != 3 {
+		t.Fatalf("hook calls = %+v, want exactly one for task 4242 with usage 7/3", got)
+	}
+	SetUsageHook(nil)
+	if _, _, _, err := rec.Complete(ctx, llm.CompletionRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatal("a removed hook must not be called")
+	}
+}

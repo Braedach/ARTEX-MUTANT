@@ -110,6 +110,7 @@ const (
 // Server exposes the ARTEX backend over a JSON HTTP API for the shadcn/ui
 // frontend.
 type Server struct {
+	budget *budgetTracker // per-task token budget guard (see tokenbudget.go)
 	m      *Manager
 	engine *Engine
 	ctx    context.Context
@@ -245,6 +246,10 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	// First-run protection: cache the password hash and, while none is set, issue
 	// the console setup token (or apply ARTEX_ADMIN_PASSWORD) before any request.
 	s.bootstrapAuth()
+	// Cost controls: prompt caching switch (default on) and the per-task token budget.
+	agent.SetPromptCache(m.pg.GetBool(settingPromptCache, true))
+	s.budget = newBudgetTracker()
+	llmrec.SetUsageHook(s.onLLMUsage)
 	s.initSideQuestions()
 	// 熔断阈值/冷却是失败路径上的热参数，启动时把全局重试策略推给 Registry 一次；
 	// 之后每次保存策略再推一次（saveLLMRetryPolicy）。
@@ -3473,6 +3478,12 @@ func (s *Server) settingsPayload() map[string]any {
 		// 实验功能:noa 模型驱动上下文压缩(默认关)。开启后平台接入的四类 agent 由 noa
 		// 接管上下文压缩,取代内置 compaction;每 run 读一次,对之后启动的 run 生效。
 		"noa_compaction": s.m.NoaCompactionEnabled(),
+		// Cost controls. prompt_cache: explicit/automatic provider prompt caching, on by
+		// default. task_token_budget: cost-weighted tokens per task before it is paused
+		// (0 = unlimited). prompt_cache_env_off: ARTEX_PROMPT_CACHE=off forces it off.
+		"prompt_cache":         agent.PromptCacheEnabled(),
+		"prompt_cache_env_off": agent.PromptCacheEnvOff(),
+		"task_token_budget":    s.m.TaskTokenBudget(),
 		// 漏洞 IM 推送的全局项。渠道本身是独立资源，走 /api/notify/* 管理；
 		// 这里只放「作用于全部渠道」的三项。
 		"notify_enabled":             s.m.pg.GetBool(settingNotifyEnabled, true),
@@ -3545,6 +3556,9 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		ConstraintsInjectWorker  *bool `json:"constraints_inject_worker"`
 		// 实验功能:noa 上下文压缩开关(默认关);每 run 读,对之后启动的 run 生效,无需重建 agent。
 		NoaCompaction *bool `json:"noa_compaction"`
+		// Cost controls (see tokenbudget.go and agent/promptcache.go); both apply at once.
+		PromptCache     *bool  `json:"prompt_cache"`
+		TaskTokenBudget *int64 `json:"task_token_budget"`
 		// 漏洞 IM 推送的全局项。三者都由投递引擎每轮读一次，改完即时生效，
 		// 不需要重建 agent 或重启。
 		NotifyEnabled    *bool   `json:"notify_enabled"`
@@ -3567,6 +3581,19 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if req.ConstraintsInjectWorker != nil {
 		if err := s.m.pg.SetBool(settingConstraintsInjectWorker, *req.ConstraintsInjectWorker); err != nil {
 			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.PromptCache != nil {
+		if err := s.m.pg.SetBool(settingPromptCache, *req.PromptCache); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		agent.SetPromptCache(*req.PromptCache)
+	}
+	if req.TaskTokenBudget != nil {
+		if err := s.m.SetTaskTokenBudget(*req.TaskTokenBudget); err != nil {
+			writeErr(w, 400, err.Error())
 			return
 		}
 	}

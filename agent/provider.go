@@ -350,11 +350,26 @@ func (t quotaAwareTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// them: norma builds the request body internally and decodes the SSE response
 	// before either reaches the recorder.
 	capt := llmrec.CaptureFrom(req.Context())
+	// Prompt caching (see promptcache.go): add the moving cache breakpoint to an
+	// Anthropic Messages request, or strip every marker when caching is off or this
+	// host has refused them. The recorder below then sees exactly what is sent.
+	req, marked := prepareCacheMarkers(req)
 	capt.SetRequest(requestBodySnapshot(req))
 
 	resp, err := t.base.RoundTrip(req)
 	if err != nil || resp == nil {
 		return resp, err
+	}
+	// A gateway that speaks the Anthropic wire format but rejects cache_control
+	// gets one retry with the markers removed, and is not sent them again.
+	if marked {
+		if retry, _ := retryWithoutCache(req, resp); retry != nil {
+			capt.SetRequest(requestBodySnapshot(retry))
+			resp, err = t.base.RoundTrip(retry)
+			if err != nil || resp == nil {
+				return resp, err
+			}
+		}
 	}
 	// Tee rather than read: a 200 is an SSE stream that must keep streaming. The
 	// 429 branch below reads through this wrapper, so its body lands in the

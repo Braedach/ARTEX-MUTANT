@@ -3095,6 +3095,11 @@
       "pythonSaved": "Saved the Python interpreter setting",
       "bindingOn": "Turned on automatic agent traffic binding",
       "bindingOff": "Turned off automatic agent traffic binding",
+      "promptCacheOn": "Turned on prompt caching",
+      "promptCacheOff": "Turned off prompt caching",
+      "budgetInvalid": "The token budget must be a whole number of 0 or more",
+      "budgetSaved": "Saved the per-task token budget",
+      "budgetUnlimited": "Removed the per-task token budget limit",
       "noaOn": "Turned on noa context compression (applies to runs started afterward)",
       "noaOff": "Turned off noa context compression (restored built-in compression)",
       "webSearchSaved": "Saved the web search settings",
@@ -3133,6 +3138,15 @@
       "desc": "When on, each task's <b>behavior constraints</b> (the allow/deny items managed under “Behavior Constraints” in the task overview) are appended to that agent's system prompt to limit the exploration scope (e.g., “Test the current port only”, “No brute forcing”).<br></br>You can control injection separately for the <b>planner</b> and the <b>worker</b>; both default to on. Changes apply immediately (read on the next round) with no need to regenerate the agents. When off, that agent no longer sees the constraints.",
       "injectPlanner": "Inject into the planner",
       "injectWorker": "Inject into the worker"
+    },
+    "costControls": {
+      "title": "Cost controls",
+      "desc": "Two safeguards against runaway token spend. <b>Prompt caching</b> lets the provider reuse the part of every request that does not change between turns (the tool definitions, the system prompt and the earlier conversation), which is most of what an agent sends; it is on by default and works with Anthropic (explicit markers) and with OpenAI-style providers (automatic). The <b>per-task token budget</b> pauses a task that has used more than the budget.",
+      "promptCache": "Prompt caching",
+      "envOff": "Turned off by the ARTEX_PROMPT_CACHE=off environment variable on the server; remove it to use this switch.",
+      "budget": "Per-task token budget (cost-weighted tokens, 0 = unlimited)",
+      "budgetHint": "Counts uncached input as 1, cached reads as 0.1, cache writes as 1.25 and output as 5, so a task that uses caching is not charged as if it did not. When a task goes over, it is paused and the server log says so; raise this number and resume the task to continue. Applies at once.",
+      "save": "Save"
     },
     "experimental": {
       "title": "Experimental Features",
