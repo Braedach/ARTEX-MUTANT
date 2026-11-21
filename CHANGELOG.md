@@ -15,6 +15,25 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
 
 ## [Unreleased]
 
+### Token efficiency (cost)
+
+- **Prompt caching was never switched on, and is now on by default for every provider.** Every agent call
+  re-sends the tool definitions and the system prompt (8k to 40k tokens), and for the Anthropic wire format
+  the system prompt was only marked cacheable when a global MCP server existed (`deferredSystem` returned
+  boundary 0 otherwise). On a stack with no MCP servers, no request ever carried a cache marker: a
+  two-task, three-minute run on the production stack used 1,007,257 input tokens with 0 cached. The system
+  prompt is now always cacheable, and a moving breakpoint on the last conversation block lets each turn read
+  the previous turn's prefix from the cache. OpenAI-style providers cache a stable prefix automatically, so
+  `prefix_stability_test.go` pins that the tool list and default prompts are byte-identical between calls.
+  A gateway that speaks the Anthropic format but rejects `cache_control` gets one retry without markers and
+  is not sent them again. Switch: Settings -> Cost controls, or `ARTEX_PROMPT_CACHE=off`. See
+  `docs/token-efficiency.md` for the measurements and the design.
+- **New per-task token budget.** A task that goes over it (cost-weighted: uncached input 1, cache read 0.1,
+  cache write 1.25, output 5) is paused with a line in the server log until you raise the budget and resume.
+  Default 25 million units, 0 = unlimited. Settings -> Cost controls.
+- **The dashboard token view defaults to the ledger ("New")**, which meters every call. The old default
+  under-counted (547.8k against 1,007k for the same run).
+
 ### Security hardening
 
 - **Dependency alert cleared (`minimatch`, moderate denial of service)**: the vulnerable copy came in through the

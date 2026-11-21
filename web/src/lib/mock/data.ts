@@ -3465,6 +3465,9 @@ export const settings: Settings = {
   llm_pool_enabled: true,
   llm_pool_bind_fallback: false,
   noa_compaction: false,
+  prompt_cache: true,
+  prompt_cache_env_off: false,
+  task_token_budget: 25000000,
 };
 
 // ── LLM 轮询（故障转移）──────────────────────────────────────────────────────

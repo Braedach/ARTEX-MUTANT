@@ -9,6 +9,7 @@ import (
 	"iter"
 	"log"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Autumn-27/artex/db"
@@ -72,6 +73,21 @@ type Recorder struct {
 	thinkingType    string
 	reasoningEffort string
 	enabled         func() bool // reports whether recording is currently on; nil = always record
+}
+
+// usageHook, when set, is told about every metered call right after its ledger
+// row is written. The server uses it to enforce the per-task token budget. It runs
+// on the caller's goroutine, so it must return quickly and never block on the call
+// it is reporting.
+var usageHook atomic.Pointer[func(taskID string, usage llm.Usage)]
+
+// SetUsageHook installs (or, with nil, removes) the metering callback.
+func SetUsageHook(fn func(taskID string, usage llm.Usage)) {
+	if fn == nil {
+		usageHook.Store(nil)
+		return
+	}
+	usageHook.Store(&fn)
 }
 
 // Wrap returns a Provider that records calls to pg when enabled() reports true.
@@ -287,6 +303,9 @@ func (r *Recorder) recordUsage(taskID string, expID int64, worker string, usage 
 	})
 	if err != nil {
 		log.Printf("[llmusage] insert: %v", err)
+	}
+	if h := usageHook.Load(); h != nil && taskID != "" {
+		(*h)(taskID, usage)
 	}
 }
 

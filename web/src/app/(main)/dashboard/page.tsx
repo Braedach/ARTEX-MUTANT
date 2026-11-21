@@ -330,8 +330,8 @@ export default function DashboardPage() {
   // tasks whose llm_profile_id is null/undefined used the active default profile
   const defaultProfileId = activeProfile ? Number(activeProfile.id) : null;
 
-  // 数据源开关：旧版 = activity（task.tokens + 会话），新版 = llm_usage 计量账本。
-  const [tokenVersion, setTokenVersion] = React.useState<"old" | "new">("old");
+  // 数据源开关：旧版 = activity（task.tokens + 会话），新版 = llm_usage 计量账本。默认「新版」：它是逐次调用的权威账本（含被取消/失败的调用），旧版漏计其中一部分。
+  const [tokenVersion, setTokenVersion] = React.useState<"old" | "new">("new");
   // selected profile tab: "all" = 全部; number = specific profile id
   const [tokenTab, setTokenTab] = React.useState<number | null | "all">("all");
   // day range for the daily bar chart

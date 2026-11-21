@@ -168,6 +168,7 @@ func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir,
 	captureRun(ctx, agentcore.Options{
 		Provider:               prov,
 		SystemPrompt:           []string{sys},
+		DynamicBoundary:        1, // whole system prompt cacheable: this loop re-sends it (plus the tools) on every step
 		Tools:                  tools,
 		PermissionMode:         acperm.ModeBypass,
 		DisableBackgroundTasks: true,

@@ -5,6 +5,7 @@ import * as React from "react";
 import {
   CpuIcon,
   FlaskConicalIcon,
+  GaugeIcon,
   KeyboardIcon,
   LanguagesIcon,
   RadioTowerIcon,
@@ -60,6 +61,11 @@ export default function SystemSettingsPage() {
   const [injectWorker, setInjectWorker] = React.useState(true);
   // 实验功能:noa 上下文压缩(默认关)。
   const [noaCompaction, setNoaCompaction] = React.useState(false);
+  // Cost controls: provider prompt caching (default on) and the per-task token budget.
+  const [promptCache, setPromptCache] = React.useState(true);
+  const [promptCacheEnvOff, setPromptCacheEnvOff] = React.useState(false);
+  const [budgetInput, setBudgetInput] = React.useState("25000000");
+  const [savingBudget, setSavingBudget] = React.useState(false);
   // 纯前端偏好：不走 /api/settings，直接读写 localStorage。
   const sendMode = useChatSendMode();
   const sendModeOptions = useChatSendModeOptions();
@@ -80,6 +86,9 @@ export default function SystemSettingsPage() {
     setInjectPlanner(s.constraints_inject_planner !== false);
     setInjectWorker(s.constraints_inject_worker !== false);
     setNoaCompaction(!!s.noa_compaction);
+    setPromptCache(s.prompt_cache !== false);
+    setPromptCacheEnvOff(!!s.prompt_cache_env_off);
+    setBudgetInput(String(s.task_token_budget ?? 25000000));
   }, []);
 
   const saveWorkers = () => {
@@ -178,6 +187,37 @@ export default function SystemSettingsPage() {
       .setSettings({ constraints_inject_worker: v })
       .then(apply)
       .catch(() => setInjectWorker(!v)); // revert on failure
+  };
+
+  const togglePromptCache = (v: boolean) => {
+    setPromptCache(v); // optimistic
+    api
+      .setSettings({ prompt_cache: v })
+      .then((s) => {
+        apply(s);
+        toast.success(v ? t("toast.promptCacheOn") : t("toast.promptCacheOff"));
+      })
+      .catch((e) => {
+        setPromptCache(!v); // revert on failure
+        toast.error(t("toast.saveFailed", { error: (e as Error).message }));
+      });
+  };
+
+  const saveBudget = () => {
+    const n = Number(budgetInput);
+    if (!Number.isInteger(n) || n < 0) {
+      toast.error(t("toast.budgetInvalid"));
+      return;
+    }
+    setSavingBudget(true);
+    api
+      .setSettings({ task_token_budget: n })
+      .then((s) => {
+        apply(s);
+        toast.success(n === 0 ? t("toast.budgetUnlimited") : t("toast.budgetSaved"));
+      })
+      .catch((e) => toast.error(t("toast.saveFailed", { error: (e as Error).message })))
+      .finally(() => setSavingBudget(false));
   };
 
   const toggleNoaCompaction = (v: boolean) => {
@@ -407,6 +447,50 @@ export default function SystemSettingsPage() {
                 disabled={!loaded}
                 onCheckedChange={toggleInjectWorker}
               />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="mb-4 break-inside-avoid md:mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <GaugeIcon className="size-4" />
+              {t("costControls.title")}
+            </CardTitle>
+            <CardDescription>{t.rich("costControls.desc", richTags)}</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="prompt-cache" className="text-sm font-normal text-muted-foreground">
+                {t("costControls.promptCache")}
+                {promptCache && !promptCacheEnvOff ? t("onSuffix") : t("offSuffix")}
+              </Label>
+              <Switch
+                id="prompt-cache"
+                checked={promptCache && !promptCacheEnvOff}
+                disabled={!loaded || promptCacheEnvOff}
+                onCheckedChange={togglePromptCache}
+              />
+            </div>
+            {promptCacheEnvOff ? <p className="text-xs text-muted-foreground">{t("costControls.envOff")}</p> : null}
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="task-token-budget" className="text-sm font-normal text-muted-foreground">
+                {t("costControls.budget")}
+              </Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="task-token-budget"
+                  inputMode="numeric"
+                  value={budgetInput}
+                  disabled={!loaded}
+                  onChange={(e) => setBudgetInput(e.target.value)}
+                  className="max-w-48"
+                />
+                <Button size="sm" onClick={saveBudget} disabled={!loaded || savingBudget}>
+                  {t("costControls.save")}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">{t("costControls.budgetHint")}</p>
             </div>
           </CardContent>
         </Card>

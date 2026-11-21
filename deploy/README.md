@@ -166,6 +166,10 @@ findings, Korean menus.
 - `ARTEX_DISABLE_SELFUPDATE=1`: the in-app updater is off. It is hard-wired to
   `Autumn-27/artex` and trusts a same-release `SHA256SUMS`; upgrade by pinning
   a new `ARTEX_TAG` instead.
+- Prompt caching is on by default (the agents re-send the same large prefix on every call; caching makes
+  that a fraction of the cost). `ARTEX_PROMPT_CACHE=off` turns it off for a gateway that mishandles it; the
+  environment wins over the Settings switch. A per-task token budget (Settings -> Cost controls, default
+  25M cost-weighted units) pauses a task that overspends. See `docs/token-efficiency.md`.
 - `ARTEX_SETUP_TOKEN` / `ARTEX_ADMIN_PASSWORD`: first-run protection. With no
   password set, `/api/auth/init` needs the setup token (printed in the container
   log) and is rate-limited; set `ARTEX_ADMIN_PASSWORD` for unattended setup.

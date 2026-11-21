@@ -332,3 +332,39 @@ func ParseExpID(s string) int64 {
 	}
 	return n
 }
+
+// Cost weights, relative to one uncached input token. They approximate how the
+// major providers price prompt caching (a cache read is a small fraction of an
+// input token, a cache write costs a little more, and output costs several times
+// more). They are only used to compare spend against a token budget, so a rough
+// ratio that is the same for every provider is the point: a budget has to count a
+// cached million tokens as much cheaper than an uncached million, or turning
+// caching on would make every task look as expensive as before.
+const (
+	WeightCacheRead  = 0.1
+	WeightCacheWrite = 1.25
+	WeightOutput     = 5.0
+)
+
+// WeightedTokens converts one call's usage to cost-weighted input-token units.
+// inputTokens INCLUDES the cached tokens (the SDK normalises every provider to
+// that convention), so the uncached part is what is left after removing them.
+func WeightedTokens(inputTokens, outputTokens, cacheRead, cacheWrite int) float64 {
+	uncached := inputTokens - cacheRead - cacheWrite
+	if uncached < 0 {
+		uncached = 0
+	}
+	return float64(uncached) + WeightCacheWrite*float64(cacheWrite) +
+		WeightCacheRead*float64(cacheRead) + WeightOutput*float64(outputTokens)
+}
+
+// TaskWeightedTokens sums a task's whole ledger in cost-weighted units (the same
+// formula as WeightedTokens). taskID is the task registry id.
+func (d *DB) TaskWeightedTokens(taskID string) (float64, error) {
+	var v float64
+	err := d.QueryRow(`
+SELECT COALESCE(SUM(GREATEST(input_tokens - cache_read - cache_write, 0)
+                  + 1.25 * cache_write + 0.1 * cache_read + 5.0 * output_tokens), 0)::float8
+FROM llm_usage WHERE COALESCE(task_id,'') = $1`, taskID).Scan(&v)
+	return v, err
+}
