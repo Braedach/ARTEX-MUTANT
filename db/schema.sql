@@ -1436,3 +1436,42 @@ CREATE INDEX IF NOT EXISTS idx_notification_deliveries_batch
     ON notification_deliveries(batch_id) WHERE batch_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_notification_deliveries_channel
     ON notification_deliveries(channel_id, id DESC);
+
+-- ============================================================================
+-- Multi-user accounts and roles (docs/multiuser-design.md, phase 1). Additive:
+-- the legacy single admin password (settings key auth.password_hash) is left in
+-- place so rolling back to an older image still works.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS users (
+    id             BIGSERIAL PRIMARY KEY,
+    username       TEXT NOT NULL,
+    display_name   TEXT NOT NULL DEFAULT '',
+    email          TEXT NOT NULL DEFAULT '',
+    password_hash  TEXT NOT NULL,
+    role           TEXT NOT NULL CHECK (role IN ('viewer','analyst','operator','admin')),
+    disabled       BOOLEAN NOT NULL DEFAULT false,
+    must_change_pw BOOLEAN NOT NULL DEFAULT false,
+    token_version  INTEGER NOT NULL DEFAULT 1,
+    failed_logins  INTEGER NOT NULL DEFAULT 0,
+    locked_until   TIMESTAMPTZ,
+    last_login_at  TIMESTAMPTZ,
+    created_by     BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users (lower(username));
+
+-- Security and action log: logins, lockouts, user/role changes, and every
+-- state-changing API request with the acting user.
+CREATE TABLE IF NOT EXISTS security_log (
+    id        BIGSERIAL PRIMARY KEY,
+    ts        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    user_id   BIGINT,
+    username  TEXT NOT NULL DEFAULT '',
+    role      TEXT NOT NULL DEFAULT '',
+    event     TEXT NOT NULL,
+    detail    TEXT NOT NULL DEFAULT '',
+    ip        TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_security_log_ts ON security_log (ts DESC);
+
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS created_by BIGINT REFERENCES users(id) ON DELETE SET NULL;

@@ -173,6 +173,10 @@ findings, Korean menus.
 - `ARTEX_SETUP_TOKEN` / `ARTEX_ADMIN_PASSWORD`: first-run protection. With no
   password set, `/api/auth/init` needs the setup token (printed in the container
   log) and is rate-limited; set `ARTEX_ADMIN_PASSWORD` for unattended setup.
+- Accounts and roles: the first admin is created by the setup flow or from `ARTEX_ADMIN_PASSWORD` (user name
+  `ARTEX`, or `ARTEX_ADMIN_USERNAME`). Further users are managed on the **Users** page (admin only). An existing
+  single-password install migrates to an `ARTEX` admin account on first start; everyone signs in again once.
+  Forgotten admin password: `reset-password.sh --login ARTEX`. See `docs/multiuser-design.md`.
 - Ports 8787/8788 are published on all interfaces; the per-host firewall is the
   control (see Design-Reference, Section 10.3).
 - Test builds: `./publish.sh v0.1.3-rc.1` pushes only that tag and a GitHub

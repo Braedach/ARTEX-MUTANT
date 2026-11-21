@@ -35,14 +35,19 @@ func newAuthTestRig(t *testing.T) *authTestRig {
 		t.Skipf("postgres unavailable (%v) — skipping", err)
 	}
 	t.Cleanup(func() { _ = d.Close() })
-	clear := func() { _, _ = d.Exec(`DELETE FROM settings WHERE key = $1`, authPassKey) }
+	clear := func() {
+		_, _ = d.Exec(`UPDATE tasks SET created_by=NULL`)
+		_, _ = d.Exec(`DELETE FROM security_log`)
+		_, _ = d.Exec(`DELETE FROM users`)
+		_, _ = d.Exec(`DELETE FROM settings WHERE key = $1`, authPassKey)
+	}
 	clear()
 	t.Cleanup(clear)
 	t.Setenv(setupTokenEnv, "")
 	t.Setenv(adminPasswordEnv, "")
 
 	s := &Server{m: &Manager{pg: d}, jwtKey: []byte(strings.Repeat("s", 32))}
-	mux := http.NewServeMux()
+	mux := newRouteMux()
 	mux.HandleFunc("GET /api/auth/status", s.authStatus)
 	mux.HandleFunc("POST /api/auth/init", s.authInit)
 	mux.HandleFunc("POST /api/auth/login", s.authLogin)
@@ -51,8 +56,21 @@ func newAuthTestRig(t *testing.T) *authTestRig {
 	mux.HandleFunc("GET /api/auth/session", s.authSession)
 	mux.HandleFunc("GET /api/ping", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("POST /api/ping", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	// Real user-management handlers plus stand-ins for one route of each permission
+	// class, so the RBAC tests exercise the production middleware end to end.
+	ok := func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]any{"ok": true}) }
+	mux.HandleFunc("GET /api/users", s.listUsers)
+	mux.HandleFunc("POST /api/users", s.createUser)
+	mux.HandleFunc("PATCH /api/users/{id}", s.updateUser)
+	mux.HandleFunc("POST /api/users/{id}/reset-password", s.resetUserPassword)
+	mux.HandleFunc("GET /api/security-log", s.listSecurityLog)
+	mux.HandleFunc("GET /api/tasks", ok)           // task:read   (viewer)
+	mux.HandleFunc("GET /api/traffic", ok)         // evidence:read (analyst)
+	mux.HandleFunc("POST /api/tasks", ok)          // task:write  (operator)
+	mux.HandleFunc("PUT /api/settings", ok)        // config:write (admin)
+	mux.HandleFunc("POST /api/unlisted/route", ok) // deliberately missing from the table
 	// Same chain as production: CORS, CSRF guard, JWT.
-	return &authTestRig{t: t, s: s, h: cors(csrfGuard(corsAllowedOrigins(), s.requireAuth(mux)))}
+	return &authTestRig{t: t, s: s, h: cors(csrfGuard(corsAllowedOrigins(), s.requireAuth(mux, mux.patternFor)))}
 }
 
 func (r *authTestRig) do(method, path, token string, body map[string]any) (int, map[string]any) {
@@ -89,8 +107,8 @@ func TestAuthInitRequiresSetupTokenDB(t *testing.T) {
 	rig := newAuthTestRig(t)
 	s := rig.s
 	s.bootstrapAuth()
-	if h, _ := s.cachedPassHash(); h != "" {
-		t.Fatal("빈 DB 에서는 비밀번호가 없어야 합니다")
+	if has, _ := s.hasAnyAccount(); has {
+		t.Fatal("빈 DB 에서는 계정이 없어야 합니다")
 	}
 	setup := s.currentSetupToken()
 	if setup == "" {
@@ -111,8 +129,8 @@ func TestAuthInitRequiresSetupTokenDB(t *testing.T) {
 	}
 	code, body = rig.do(http.MethodPost, "/api/auth/init", "", map[string]any{"password": "attacker-set-password-123!", "setup_token": "guess"})
 	rig.expect(403, code, body, authErrSetupTokenInvalid)
-	if h, _ := s.reloadPassHash(); h != "" {
-		t.Fatal("거부된 호출이 비밀번호를 저장하면 안 됩니다")
+	if has, _ := s.hasAnyAccount(); has {
+		t.Fatal("거부된 호출이 계정을 만들면 안 됩니다")
 	}
 
 	// 올바른 토큰이라도 서버가 최소 길이를 검사한다.
@@ -157,7 +175,7 @@ func TestAuthInitRequiresSetupTokenDB(t *testing.T) {
 	code, body = rig.do(http.MethodPost, "/api/auth/change-password", tok1, map[string]any{"old_password": "nope-nope-123", "new_password": "changed-pass-123"})
 	rig.expect(401, code, body, authErrCurrentPasswordWrong)
 	code, body = rig.do(http.MethodPost, "/api/auth/change-password", tok1, map[string]any{"old_password": "operator-pass-123", "new_password": "short"})
-	rig.expect(400, code, body, authErrPasswordTooShort)
+	rig.expect(400, code, body, errPasswordTooShortNew)
 	code, body = rig.do(http.MethodPost, "/api/auth/change-password", tok1, map[string]any{"old_password": "operator-pass-123", "new_password": "changed-pass-123"})
 	rig.expect(200, code, body, "")
 	tok3, _ := body["token"].(string)
@@ -173,21 +191,26 @@ func TestAuthInitRequiresSetupTokenDB(t *testing.T) {
 	code, body = rig.do(http.MethodPost, "/api/auth/change-password", tok1, map[string]any{"old_password": "changed-pass-123", "new_password": "another-pass-123"})
 	rig.expect(401, code, body, authErrUnauthorized)
 
-	// reset-password.sh 처럼 프로세스 밖에서 해시를 바꿔도 재시작 없이 기존 토큰이 죽고
-	// 새 비밀번호로 로그인된다. 캐시 만료 창(passHashCacheTTL) 안에서는 직전 토큰이
+	// reset-password.sh 처럼 프로세스 밖에서 비밀번호를 바꿔도(토큰 버전 증가) 재시작 없이
+	// 기존 토큰이 죽고 새 비밀번호로 로그인된다. 캐시 창(userCacheTTL) 안에서는 직전 토큰이
 	// 아직 통과하고, 창이 지나면(여기서는 0 으로 줄여 즉시) 거부되어야 한다.
 	resetHash, err := bcrypt.GenerateFromPassword([]byte("reset-pass-123"), bcrypt.DefaultCost)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.m.pg.SetSetting(authPassKey, string(resetHash)); err != nil {
+	au, err := s.m.pg.GetUserByName(legacyAdminUsername)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.m.pg.SetUserPassword(au.ID, string(resetHash), false); err != nil {
 		t.Fatal(err)
 	}
 	code, body = rig.do(http.MethodGet, "/api/ping", tok3, nil)
 	rig.expect(200, code, body, "")
-	prevTTL := passHashCacheTTL
-	passHashCacheTTL = 0
-	t.Cleanup(func() { passHashCacheTTL = prevTTL })
+	// 캐시 창이 지난 상황을 흉내 낸다(캐시된 항목을 만료시킨다).
+	s.userMu.Lock()
+	s.userCache = nil
+	s.userMu.Unlock()
 	code, body = rig.do(http.MethodGet, "/api/ping", tok3, nil)
 	rig.expect(401, code, body, authErrTokenInvalid)
 	code, body = rig.do(http.MethodPost, "/api/auth/login", "", map[string]any{"username": "ARTEX", "password": "changed-pass-123"})
@@ -219,6 +242,7 @@ func TestAuthLoginThrottledDB(t *testing.T) {
 		t.Fatal("냉각 중에는 올바른 비밀번호라도 토큰을 주면 안 됩니다")
 	}
 	rig.s.limiter().reset(clientKey(httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)))
+	rig.s.limiter().reset("u:artex")
 	code, body = rig.do(http.MethodPost, "/api/auth/login", "", map[string]any{"username": "ARTEX", "password": "operator-pass-123"})
 	rig.expect(200, code, body, "")
 }
@@ -241,11 +265,12 @@ func TestAuthBootstrapAdminPasswordEnvDB(t *testing.T) {
 	rig.expect(200, code, body, "")
 
 	// 너무 짧은 환경 변수 값은 무시되고 설정 토큰 방식으로 남는다.
+	_, _ = rig.s.m.pg.Exec(`DELETE FROM users`)
 	_, _ = rig.s.m.pg.Exec(`DELETE FROM settings WHERE key = $1`, authPassKey)
 	t.Setenv(adminPasswordEnv, "short")
 	s2 := &Server{m: rig.s.m, jwtKey: rig.s.jwtKey}
 	s2.bootstrapAuth()
-	if h, _ := s2.cachedPassHash(); h != "" {
+	if has, _ := s2.hasAnyAccount(); has {
 		t.Fatal("8자 미만 환경 변수 비밀번호는 무시되어야 합니다")
 	}
 	if s2.currentSetupToken() == "" {

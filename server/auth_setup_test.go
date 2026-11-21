@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,45 +12,6 @@ import (
 // 지키는 단위 테스트다. 설정 토큰 비교, 비밀번호 해시에 묶인 토큰 서명, CORS 허용
 // 목록, 실패 시도 제한, 루프백 바인딩 판정을 각각 확인한다. DB 를 거치는 전체 흐름은
 // auth_init_db_test.go 가 맡는다.
-
-func TestSigningKeyBoundToPasswordHash(t *testing.T) {
-	s := &Server{jwtKey: []byte(strings.Repeat("k", 32))}
-	if !bytes.Equal(s.signingKey(""), s.jwtKey) {
-		t.Fatal("비밀번호가 없을 때는 파일 키를 그대로 써야 합니다(DB 없는 테스트 호환)")
-	}
-	tok, err := signJWT(s.signingKey("hash-A"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !verifyJWT(tok, s.signingKey("hash-A")) {
-		t.Fatal("같은 해시로 파생한 키로는 검증이 되어야 합니다")
-	}
-	if verifyJWT(tok, s.signingKey("hash-B")) {
-		t.Fatal("비밀번호(해시)가 바뀌면 이전 토큰은 무효가 되어야 합니다")
-	}
-	if verifyJWT(tok, s.signingKey("")) {
-		t.Fatal("해시 파생 키로 서명한 토큰이 원본 키로 검증되면 안 됩니다")
-	}
-}
-
-func TestVerifyTokenInvalidatedByPasswordChange(t *testing.T) {
-	s := &Server{jwtKey: []byte(strings.Repeat("v", 32))}
-	s.setPassHash("hash-A")
-	tok, err := signJWT(s.signingKey("hash-A"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !s.verifyToken(tok) {
-		t.Fatal("현재 해시로 서명한 토큰은 통과해야 합니다")
-	}
-	s.setPassHash("hash-B")
-	if s.verifyToken(tok) {
-		t.Fatal("비밀번호 변경 뒤에도 이전 토큰이 통과하면 안 됩니다")
-	}
-	if s.verifyToken("") {
-		t.Fatal("빈 토큰은 통과하면 안 됩니다")
-	}
-}
 
 func TestSetupTokenFromEnvAndRandom(t *testing.T) {
 	t.Setenv(setupTokenEnv, "fixed-setup-token")

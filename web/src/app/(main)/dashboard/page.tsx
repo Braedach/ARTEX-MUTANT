@@ -225,7 +225,9 @@ export default function DashboardPage() {
     let alive = true;
     const load = async () => {
       try {
-        const [traf, counts, agentList, mcpList, skillList, toolList, profileList, usage] = await Promise.all([
+        // Each part is fetched on its own: a role without access to one of them (the server
+        // answers 403) still sees the rest of the dashboard.
+        const [traf, counts, agentList, mcpList, skillList, toolList, profileList, usage] = await Promise.allSettled([
           api.traffic(0, 50),
           api.assetCounts(),
           api.agents(),
@@ -236,14 +238,14 @@ export default function DashboardPage() {
           api.usageStats(365),
         ]);
         if (!alive) return;
-        setTraffic(traf.exchanges ?? []);
-        setAssetCounts(counts ?? {});
-        setAgents(agentList);
-        setMcpServers(mcpList);
-        setSkills(skillList);
-        setTools(toolList);
-        setLLMProfiles(profileList);
-        setUsageStats(usage);
+        if (traf.status === "fulfilled") setTraffic(traf.value.exchanges ?? []);
+        if (counts.status === "fulfilled") setAssetCounts(counts.value ?? {});
+        if (agentList.status === "fulfilled") setAgents(agentList.value);
+        if (mcpList.status === "fulfilled") setMcpServers(mcpList.value);
+        if (skillList.status === "fulfilled") setSkills(skillList.value);
+        if (toolList.status === "fulfilled") setTools(toolList.value);
+        if (profileList.status === "fulfilled") setLLMProfiles(profileList.value);
+        if (usage.status === "fulfilled") setUsageStats(usage.value);
       } catch {
         /* transient errors */
       }

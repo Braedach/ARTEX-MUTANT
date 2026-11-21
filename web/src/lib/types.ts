@@ -1619,3 +1619,30 @@ export interface InterceptExecution {
   seq: number;
   items: Activity[];
 }
+
+// ---- accounts (multi-user) ----
+export type AccountRole = "viewer" | "analyst" | "operator" | "admin";
+
+export interface AccountUser {
+  id: number;
+  username: string;
+  display_name: string;
+  email: string;
+  role: AccountRole;
+  disabled: boolean;
+  must_change_password: boolean;
+  locked_until?: string;
+  last_login_at?: string;
+  created_at: string;
+}
+
+export interface SecurityEvent {
+  id: number;
+  ts: string;
+  user_id?: number;
+  username: string;
+  role: string;
+  event: string;
+  detail: string;
+  ip: string;
+}

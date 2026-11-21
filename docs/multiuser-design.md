@@ -1,6 +1,6 @@
 # Multi-user accounts and roles: design
 
-Status: DESIGN (not implemented). Written 2026-11-21 after reading `server/auth.go`, `server/session.go` and
+Status: PHASE 1 IMPLEMENTED (accounts, roles, enforcement, UI); phases 2-4 designed only. See "As built" at the end. Written 2026-11-21 after reading `server/auth.go`, `server/session.go` and
 SpiderFoot's RBAC module (`spiderfoot/auth/rbac.py`). Decisions confirmed by the owner on 2026-11-21 are marked
 **[decided]**.
 
@@ -145,3 +145,24 @@ rejected on the user-management and token-management routes regardless of role.
 - Exact redaction rules for `viewer` on traffic and logs (proposal: header values and bodies replaced, URL and
   status shown).
 - Per-user rate limits on chat and task creation (token budget already caps spend per task).
+
+## As built (phase 1) and deviations from the design above
+
+- **Migrated admin keeps the name `ARTEX`**, not `admin`, so the sign-in everyone already uses keeps working.
+  New installs created by the setup flow also get `ARTEX` unless a username is supplied.
+- **Viewers are denied raw evidence instead of getting redacted copies.** Traffic, intercept history,
+  workspace files and chat history need `analyst`. Redaction can come later without changing the roles.
+- **Security log is a new table (`security_log`)**, not `audit_chain_log`: that table is the intercept
+  approval hash chain and is not a general audit trail.
+- **Passwords:** 12 characters minimum for everything set through the multi-user paths (create, reset, change).
+  The first-run setup screen and `ARTEX_ADMIN_PASSWORD` keep their existing 8-character minimum.
+- **Lockout:** 10 failed sign-ins lock the account for 15 minutes (in addition to the per-IP and per-username
+  throttle).
+- **Operator scope boundary is not enforced yet.** The design bounds operators by the admin-owned target
+  allowlist, but the egress scope guard ([egress-scope-guard-design.md](egress-scope-guard-design.md)) is still
+  a design. Until it is built an operator can describe any target in a task. Treat `operator` as trusted to run
+  tools; give `analyst` to people who should only review.
+- **Not in phase 1:** API tokens and the `claude` service account (phase 2), TOTP and per-company access
+  (phase 3), OIDC (phase 4). `tasks.created_by` is recorded now; the UI does not show it yet.
+- **Known gap:** `GET /api/llm/profiles` (operator and up) returns each profile's proxy URL, which can carry
+  credentials. Admin-only masking is a follow-up.

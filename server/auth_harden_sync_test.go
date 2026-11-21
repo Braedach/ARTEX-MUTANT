@@ -2,9 +2,12 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Autumn-27/artex/db"
 )
 
 // 상류 a951e4a 이식(백로그: 인증 읽기 fail-closed + 최초 설정 원자화 + 비밀번호 상한)의
@@ -90,7 +93,7 @@ func TestVerifyTokenFailsClosedWhenDataSourceUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.verifyToken(tok) {
+	if _, _, fail := s.authenticate(tok); fail == authOK {
 		t.Fatal("비밀번호 상태를 읽을 수 없는 동안에는 어떤 토큰도 통과하면 안 됩니다")
 	}
 }
@@ -109,10 +112,10 @@ func TestBootstrapAuthSkipsFirstRunWhenDataSourceUnavailable(t *testing.T) {
 	s := &Server{m: m}
 	s.bootstrapAuth()
 	s.authMu.Lock()
-	loaded := s.passHashLoaded
+	issued := s.setupToken
 	s.authMu.Unlock()
-	if loaded {
-		t.Fatal("읽기 실패를 \"비밀번호 없음\"으로 캐시하면 안 됩니다")
+	if issued != "" {
+		t.Fatal("읽기 실패를 \"계정 없음\"으로 보고 설정 토큰을 발급하면 안 됩니다")
 	}
 }
 
@@ -122,24 +125,21 @@ func TestBootstrapAdminPasswordEnvDoesNotOverwriteDB(t *testing.T) {
 	rig := newAuthTestRig(t)
 	t.Setenv(adminPasswordEnv, "first-admin-pass-123")
 	rig.s.bootstrapAuth()
-	first, err := rig.s.reloadPassHash()
-	if err != nil || first == "" {
-		t.Fatalf("첫 인스턴스가 비밀번호를 초기화해야 합니다 (err=%v)", err)
+	u1, err := rig.s.m.pg.GetUserByName(legacyAdminUsername)
+	if err != nil {
+		t.Fatalf("첫 인스턴스가 관리자 계정을 만들어야 합니다 (err=%v)", err)
 	}
+	first := u1.PasswordHash
 
 	// 두 번째 인스턴스: 시작 시점 읽기는 비어 있지 않으므로 바로 돌아가야 하지만, 읽기와
 	// 쓰기 사이의 경합을 흉내 내려고 쓰기 경로를 직접 확인한다.
-	inserted, err := rig.s.m.pg.InsertSettingIfAbsent(authPassKey, "second-hash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if inserted {
-		t.Fatal("이미 있는 비밀번호 위에 insert 가 성공하면 안 됩니다")
+	if _, err := rig.s.m.pg.CreateFirstAdmin(legacyAdminUsername, "second-hash", false); !errors.Is(err, db.ErrUsersExist) {
+		t.Fatalf("계정이 이미 있으면 첫 관리자 생성이 거부되어야 합니다: %v", err)
 	}
 	t.Setenv(adminPasswordEnv, "second-admin-pass-456")
 	s2 := &Server{m: rig.s.m, jwtKey: rig.s.jwtKey}
 	s2.bootstrapAuth()
-	if got, _ := s2.reloadPassHash(); got != first {
+	if u2, _ := rig.s.m.pg.GetUserByName(legacyAdminUsername); u2 == nil || u2.PasswordHash != first {
 		t.Fatal("두 번째 인스턴스가 기존 비밀번호를 덮어썼습니다")
 	}
 }
@@ -148,7 +148,7 @@ func TestBootstrapAdminPasswordEnvRejectsOverBcryptLimitDB(t *testing.T) {
 	rig := newAuthTestRig(t)
 	t.Setenv(adminPasswordEnv, strings.Repeat("a", 73))
 	rig.s.bootstrapAuth()
-	if h, _ := rig.s.reloadPassHash(); h != "" {
+	if has, _ := rig.s.hasAnyAccount(); has {
 		t.Fatal("72바이트를 넘는 환경 변수 비밀번호는 무시되어야 합니다")
 	}
 	if rig.s.currentSetupToken() == "" {

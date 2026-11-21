@@ -7,6 +7,7 @@ import type { ChatMention } from "@/lib/chat-mentions";
 import { MOCK } from "@/lib/mock/enabled";
 import { mockHandle } from "@/lib/mock/handler";
 import type {
+  AccountUser,
   ActiveFindingRetest,
   Activity,
   Agent,
@@ -71,6 +72,7 @@ import type {
   NotificationMeta,
   PromptVar,
   PromptVersion,
+  SecurityEvent,
   SessionTokenUsage,
   Settings,
   Severity,
@@ -253,7 +255,11 @@ export const api = {
 
   // ---- auth ----
   authStatus: () => get<{ initialized: boolean; setup_token_required?: boolean }>("/auth/status"),
-  login: (username: string, password: string) => post<{ token: string }>("/auth/login", { username, password }),
+  login: (username: string, password: string) =>
+    post<{ token: string; username: string; role: string; must_change_password: boolean }>("/auth/login", {
+      username,
+      password,
+    }),
   // 첫 실행 초기화는 서버 콘솔에만 출력되는 설정 토큰을 함께 보내야 통과한다(원격 선점 방지).
   initPassword: (password: string, setupToken: string) =>
     post<{ token: string }>("/auth/init", { password, setup_token: setupToken }),
@@ -263,6 +269,26 @@ export const api = {
       old_password: oldPassword,
       new_password: newPassword,
     }),
+
+  // ---- accounts (admin) ----
+  users: () =>
+    get<{ users: AccountUser[]; roles: string[] }>("/users").then((r) => ({
+      users: arr(r.users),
+      roles: arr(r.roles),
+    })),
+  createUser: (input: { username: string; role: string; display_name?: string; email?: string; password?: string }) =>
+    post<{ user: AccountUser; temporary_password?: string }>("/users", input),
+  updateUser: (id: number, patchBody: { role?: string; disabled?: boolean; display_name?: string; email?: string }) =>
+    patch<{ user: AccountUser }>(`/users/${id}`, patchBody),
+  resetUserPassword: (id: number, password?: string) =>
+    post<{ user: AccountUser; temporary_password?: string }>(
+      `/users/${id}/reset-password`,
+      password ? { password } : {},
+    ),
+  securityLog: (limit = 100, event = "") =>
+    get<{ events: SecurityEvent[] }>(
+      `/security-log?limit=${limit}${event ? `&event=${encodeURIComponent(event)}` : ""}`,
+    ).then((r) => arr(r.events)),
 
   // ---- tasks ----
   tasks: () =>
