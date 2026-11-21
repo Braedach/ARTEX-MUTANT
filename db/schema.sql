@@ -1475,3 +1475,22 @@ CREATE TABLE IF NOT EXISTS security_log (
 CREATE INDEX IF NOT EXISTS idx_security_log_ts ON security_log (ts DESC);
 
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS created_by BIGINT REFERENCES users(id) ON DELETE SET NULL;
+
+-- API tokens (docs/multiuser-design.md, phase 2). The token itself is shown once at
+-- creation; only its SHA-256 and a short public prefix are stored. A token acts as its
+-- user, capped at role_cap (never admin), and can be revoked or expire.
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id           BIGSERIAL PRIMARY KEY,
+    user_id      BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    prefix       TEXT NOT NULL,
+    token_hash   BYTEA NOT NULL,
+    role_cap     TEXT NOT NULL CHECK (role_cap IN ('viewer','analyst','operator')),
+    expires_at   TIMESTAMPTZ NOT NULL,
+    last_used_at TIMESTAMPTZ,
+    revoked_at   TIMESTAMPTZ,
+    created_by   BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_api_tokens_prefix ON api_tokens (prefix);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens (user_id);

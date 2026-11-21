@@ -97,7 +97,7 @@ func TestRoleInvariants(t *testing.T) {
 		}
 	}
 	// Operators never reach configuration, secrets, LLM keys, system or users.
-	for _, perm := range []string{permConfigWrite, permSecretsRead, permLLMAdmin, permSystemAdmin, permUserManage, permAuditRead} {
+	for _, perm := range []string{permConfigWrite, permSecretsRead, permLLMAdmin, permSystemAdmin, permUserManage, permAuditRead, permTokenManage} {
 		for _, p := range routesWithPerm(perm) {
 			if operator[p] {
 				t.Errorf("operator reaches the admin route %s", p)

@@ -13,6 +13,7 @@ import type {
   Agent,
   AgentDetail,
   AgentTrigger,
+  ApiToken,
   ArchiveBatchItem,
   Asset,
   AssetInterceptRule,
@@ -285,6 +286,10 @@ export const api = {
       `/users/${id}/reset-password`,
       password ? { password } : {},
     ),
+  apiTokens: () => get<{ tokens: ApiToken[] }>("/api-tokens").then((r) => arr(r.tokens)),
+  createApiToken: (input: { user_id: number; name: string; role_cap: string; expires_in_days: number }) =>
+    post<{ token: string; info: ApiToken }>("/api-tokens", input),
+  revokeApiToken: (id: number) => del<{ info: ApiToken }>(`/api-tokens/${id}`),
   securityLog: (limit = 100, event = "") =>
     get<{ events: SecurityEvent[] }>(
       `/security-log?limit=${limit}${event ? `&event=${encodeURIComponent(event)}` : ""}`,

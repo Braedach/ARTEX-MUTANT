@@ -177,6 +177,8 @@ findings, Korean menus.
   `ARTEX`, or `ARTEX_ADMIN_USERNAME`). Further users are managed on the **Users** page (admin only). An existing
   single-password install migrates to an `ARTEX` admin account on first start; everyone signs in again once.
   Forgotten admin password: `reset-password.sh --login ARTEX`. See `docs/multiuser-design.md`.
+- API tokens (admin, Users page): `Authorization: Bearer atk_...`; capped at operator or below, never admin, expiring,
+  revocable. For an assistant or script, create a dedicated operator account and issue it a token.
 - Ports 8787/8788 are published on all interfaces; the per-host firewall is the
   control (see Design-Reference, Section 10.3).
 - Test builds: `./publish.sh v0.1.3-rc.1` pushes only that tag and a GitHub

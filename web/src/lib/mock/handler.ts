@@ -1095,6 +1095,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     return { token: "mock-demo", username: "ARTEX", role: "admin", must_change_password: false };
   if (path === "/users" && m === "GET") return { users: [], roles: ["viewer", "analyst", "operator", "admin"] };
   if (path.startsWith("/security-log")) return { events: [] };
+  if (path === "/api-tokens" && m === "GET") return { tokens: [] };
   if (path === "/auth/change-password") return { ok: true };
 
   // ── task cold archives ──

@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log"
@@ -38,6 +40,14 @@ const (
 	minAccountPasswordLen = 12
 
 	adminUsernameEnv = "ARTEX_ADMIN_USERNAME"
+
+	// API tokens: "atk_" + 40 random characters. The first apiTokenPrefixLen characters are
+	// the public prefix used for lookup and display; the rest is secret.
+	apiTokenPrefix    = "atk_"
+	apiTokenLen       = 44
+	apiTokenPrefixLen = 12
+	// tokenTouchEvery bounds how often a token's last_used_at is written.
+	tokenTouchEvery = time.Minute
 )
 
 const (
@@ -53,6 +63,11 @@ type Principal struct {
 	Username     string
 	Role         string
 	MustChangePW bool
+	// ViaToken marks a request authenticated by an API token (not a browser session);
+	// TokenID and TokenPrefix identify it in the security log.
+	ViaToken    bool
+	TokenID     int64
+	TokenPrefix string
 	// Legacy marks a token signed by an older single-password build (no user id). It is
 	// honoured only while no account exists (fresh install, tests); it acts as admin.
 	Legacy bool
@@ -235,6 +250,120 @@ func (s *Server) authenticate(tok string) (*Principal, *sessionClaims, authFailu
 	return &Principal{UserID: u.ID, Username: u.Username, Role: u.Role, MustChangePW: u.MustChangePW}, claims, authOK
 }
 
+// ---- API tokens ------------------------------------------------------------
+
+// isAPIToken reports whether tok has the API token shape.
+func isAPIToken(tok string) bool { return strings.HasPrefix(tok, apiTokenPrefix) }
+
+// generateAPIToken returns a new token, its public prefix and the SHA-256 to store.
+func generateAPIToken() (token, prefix string, hash []byte, err error) {
+	b := make([]byte, apiTokenLen-len(apiTokenPrefix))
+	for i := range b {
+		n, rerr := rand.Int(rand.Reader, big.NewInt(int64(len(keyChars))))
+		if rerr != nil {
+			return "", "", nil, rerr
+		}
+		b[i] = keyChars[n.Int64()]
+	}
+	token = apiTokenPrefix + string(b)
+	sum := sha256.Sum256([]byte(token))
+	return token, token[:apiTokenPrefixLen], sum[:], nil
+}
+
+// minRole returns the lower of two roles.
+func minRole(a, b string) string {
+	if roleLevel[a] <= roleLevel[b] {
+		return a
+	}
+	return b
+}
+
+type cachedToken struct {
+	t   *db.APIToken
+	exp time.Time
+}
+
+func (s *Server) loadTokenCached(prefix string) (*db.APIToken, error) {
+	s.userMu.Lock()
+	if c, ok := s.tokenCache[prefix]; ok && time.Now().Before(c.exp) {
+		s.userMu.Unlock()
+		return c.t, nil
+	}
+	s.userMu.Unlock()
+	t, err := s.m.pg.GetAPITokenByPrefix(prefix)
+	if err != nil {
+		return nil, err
+	}
+	s.userMu.Lock()
+	if s.tokenCache == nil {
+		s.tokenCache = map[string]cachedToken{}
+	}
+	s.tokenCache[prefix] = cachedToken{t: t, exp: time.Now().Add(userCacheTTL)}
+	s.userMu.Unlock()
+	return t, nil
+}
+
+// dropToken forgets a cached token so a revocation applies on the next request.
+func (s *Server) dropToken(prefix string) {
+	s.userMu.Lock()
+	delete(s.tokenCache, prefix)
+	s.userMu.Unlock()
+}
+
+// authenticateRequest resolves the caller of r: a browser session (cookie or bearer
+// JWT) or an API token. API tokens are accepted only in the Authorization header, never
+// from a cookie.
+func (s *Server) authenticateRequest(r *http.Request) (*Principal, *sessionClaims, authFailure) {
+	tok := extractToken(r)
+	if isAPIToken(tok) {
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			return nil, nil, authBadToken
+		}
+		pr, f := s.authenticateAPIToken(tok)
+		return pr, nil, f
+	}
+	return s.authenticate(tok)
+}
+
+// authenticateAPIToken checks the token's hash, expiry and revocation and that its user is
+// still allowed in. The principal acts as the user, capped at the token's role.
+func (s *Server) authenticateAPIToken(tok string) (*Principal, authFailure) {
+	if s.m == nil || s.m.pg == nil || len(tok) != apiTokenLen {
+		return nil, authBadToken
+	}
+	t, err := s.loadTokenCached(tok[:apiTokenPrefixLen])
+	if err != nil || !t.Active(time.Now()) {
+		return nil, authBadToken
+	}
+	sum := sha256.Sum256([]byte(tok))
+	if subtle.ConstantTimeCompare(sum[:], t.Hash) != 1 {
+		return nil, authBadToken
+	}
+	u, err := s.loadUserCached(t.UserID)
+	if err != nil || u.Disabled || u.Locked(time.Now()) {
+		return nil, authBadToken
+	}
+	s.touchToken(t.ID)
+	return &Principal{
+		UserID: u.ID, Username: u.Username, Role: minRole(u.Role, t.RoleCap), MustChangePW: u.MustChangePW,
+		ViaToken: true, TokenID: t.ID, TokenPrefix: t.Prefix,
+	}, authOK
+}
+
+// touchToken records a token's last use, at most once per tokenTouchEvery.
+func (s *Server) touchToken(id int64) {
+	now := time.Now()
+	if last, ok := s.tokenTouched.Load(id); ok && now.Sub(last.(time.Time)) < tokenTouchEvery {
+		return
+	}
+	s.tokenTouched.Store(id, now)
+	go func() {
+		if err := s.m.pg.TouchAPIToken(id); err != nil {
+			log.Printf("[auth] could not record token use: %v", err)
+		}
+	}()
+}
+
 // ---- middleware ------------------------------------------------------------
 
 type statusRecorder struct {
@@ -275,7 +404,15 @@ func (s *Server) requireAuth(h http.Handler, lookup func(*http.Request) string) 
 			return
 		}
 		tok := extractToken(r)
-		pr, claims, fail := s.authenticate(tok)
+		isTok := strings.HasPrefix(tok, apiTokenPrefix)
+		if isTok && !s.limiter().allow(clientKey(r)) {
+			writeErr(w, 429, authErrTooManyAttempts)
+			return
+		}
+		pr, claims, fail := s.authenticateRequest(r)
+		if fail == authBadToken && isTok {
+			s.limiter().fail(clientKey(r))
+		}
 		switch fail {
 		case authNoToken:
 			writeErr(w, 401, authErrUnauthorized)
@@ -295,6 +432,11 @@ func (s *Server) requireAuth(h http.Handler, lookup func(*http.Request) string) 
 				writeErr(w, 403, errForbidden)
 				return
 			}
+			if pr.ViaToken && (perm == permUserManage || perm == permTokenManage) {
+				s.securityEvent(pr, pr.Username, pr.Role, "denied", r.Method+" "+r.URL.Path+" refused for API token "+pr.TokenPrefix, clientKey(r))
+				writeErr(w, 403, errForbidden)
+				return
+			}
 			if perm != permPublic && !roleHas(pr.Role, perm) {
 				s.securityEvent(pr, pr.Username, pr.Role, "denied", r.Method+" "+r.URL.Path+" needs "+perm, clientKey(r))
 				writeErr(w, 403, errForbidden)
@@ -306,7 +448,11 @@ func (s *Server) requireAuth(h http.Handler, lookup func(*http.Request) string) 
 		if isMutatingMethod(r.Method) {
 			rec := &statusRecorder{ResponseWriter: w}
 			h.ServeHTTP(rec, r)
-			s.securityEvent(pr, pr.Username, pr.Role, "api", fmt.Sprintf("%s %s -> %d", r.Method, r.URL.Path, rec.status), clientKey(r))
+			via := ""
+			if pr.ViaToken {
+				via = " via token " + pr.TokenPrefix
+			}
+			s.securityEvent(pr, pr.Username, pr.Role, "api", fmt.Sprintf("%s %s -> %d%s", r.Method, r.URL.Path, rec.status, via), clientKey(r))
 			return
 		}
 		h.ServeHTTP(w, r)
@@ -638,9 +784,13 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
-	pr, _, fail := s.authenticate(extractToken(r))
+	pr, _, fail := s.authenticateRequest(r)
 	if fail != authOK {
 		writeErr(w, 401, authErrUnauthorized)
+		return
+	}
+	if pr.ViaToken {
+		writeErr(w, 403, errForbidden) // an API token cannot change a password
 		return
 	}
 	if pr.Legacy {
@@ -710,7 +860,7 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 // cookie. Always 200: "not signed in" is an ordinary answer.
 func (s *Server) authSession(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	pr, _, fail := s.authenticate(extractToken(r))
+	pr, _, fail := s.authenticateRequest(r)
 	if fail != authOK {
 		writeJSON(w, 200, map[string]any{"authenticated": false})
 		return

@@ -15,6 +15,20 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
 
 ## [Unreleased]
 
+### Multi-user accounts and roles (phase 2: API tokens)
+
+- **API tokens** let a script or an assistant act as one account without its password. A token looks like
+  `atk_` plus 40 random characters, is shown once at creation, and only its SHA-256 and a short public prefix
+  are stored. It acts as its account, **capped at a role that is never admin**, expires (default 90 days,
+  maximum 365) and can be revoked at any time. A token's effective role is the lower of the account's role and
+  its cap, so demoting or disabling the account takes effect on the token at once.
+- Tokens are accepted only in the `Authorization: Bearer` header (never as a cookie), cannot manage users or
+  tokens, cannot change a password, and bad tokens are throttled per client. Use is recorded in the security
+  log (`via token <prefix>`, never the token), and `last_used_at` is stamped.
+- Admin-only management: `GET/POST /api/api-tokens`, `DELETE /api/api-tokens/{id}`, and an **API tokens** tab
+  on the Users page.
+- New table `api_tokens`.
+
 ### Multi-user accounts and roles (phase 1)
 
 - **Per-user accounts with four cumulative roles: viewer, analyst, operator, admin.** Until now there was one

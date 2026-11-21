@@ -166,3 +166,17 @@ rejected on the user-management and token-management routes regardless of role.
   (phase 3), OIDC (phase 4). `tasks.created_by` is recorded now; the UI does not show it yet.
 - **Known gap:** `GET /api/llm/profiles` (operator and up) returns each profile's proxy URL, which can carry
   credentials. Admin-only masking is a follow-up.
+
+## As built (phase 2: API tokens)
+
+- Format `atk_` + 40 characters (about 238 bits). Lookup is by the 12-character public prefix, then a
+  constant-time compare of the SHA-256. Nothing but the hash is stored.
+- A token acts as one account, capped at `viewer`, `analyst` or `operator` (the database refuses `admin`). Effective
+  role = lower of the account's role and the cap, re-evaluated on every request.
+- Refused on `user:manage` and `token:manage` routes and on change-password, whatever the role, and accepted only in the
+  `Authorization` header. Revocation, expiry, a disabled or locked account and a demoted account all apply on
+  the next request (a few seconds at most across processes; at once in the process that handled the change).
+- Management is admin-only (`token:manage`): create, list and revoke any account's tokens. Self-service tokens for
+  non-admins are not built.
+- The `claude` service account itself is **not** created automatically. An admin creates the account (operator) on
+  the Users page and then issues it a token.
