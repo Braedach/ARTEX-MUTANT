@@ -21,7 +21,13 @@ describe("auth.session", () => {
 
   it("reports an authenticated session from the server", async () => {
     fetchMock.mockResolvedValue(jsonResponse({ authenticated: true, username: "ARTEX" }));
-    await expect(auth.session()).resolves.toEqual({ authenticated: true, username: "ARTEX" });
+    await expect(auth.session()).resolves.toEqual({
+      authenticated: true,
+      username: "ARTEX",
+      role: undefined,
+      permissions: [],
+      mustChangePassword: false,
+    });
   });
 
   it("asks the server with same-origin credentials, no stored token and no Authorization header", async () => {
@@ -49,7 +55,9 @@ describe("auth.session", () => {
 
   it("is signed in without a server in the mock demo", async () => {
     vi.stubEnv("NEXT_PUBLIC_MOCK", "1");
-    await expect(auth.session()).resolves.toEqual({ authenticated: true, username: "ARTEX" });
+    const s = await auth.session();
+    expect(s).toMatchObject({ authenticated: true, username: "ARTEX", role: "admin" });
+    expect(s.permissions).toContain("user:manage");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -142,6 +150,31 @@ describe("userFromSession", () => {
   it("uses the server-supplied name and falls back to the single admin account", () => {
     expect(userFromSession({ authenticated: true, username: "ARTEX" }).name).toBe("ARTEX");
     expect(userFromSession({ authenticated: true }).name).toBe("ARTEX");
-    expect(userFromSession({ authenticated: true }).role).toBe("operator");
+    expect(userFromSession({ authenticated: true }).role).toBe("viewer");
+    expect(userFromSession({ authenticated: true, role: "admin" }).role).toBe("admin");
+  });
+});
+
+describe("can and filterNavGroups", () => {
+  it("treats a missing requirement as visible and a missing permission as hidden", async () => {
+    const { can } = await import("./auth");
+    expect(can({ permissions: [] })).toBe(true);
+    expect(can({ permissions: ["task:read"] }, "task:read")).toBe(true);
+    expect(can({ permissions: ["task:read"] }, "user:manage")).toBe(false);
+    expect(can(null, "task:read")).toBe(false);
+  });
+
+  it("hides administration entries from a viewer and shows everything to an admin", async () => {
+    const { filterNavGroups, sidebarItems } = await import("@/navigation/sidebar/sidebar-items");
+    const ids = (perms: string[]) => filterNavGroups(sidebarItems, perms).flatMap((g) => g.items.map((i) => i.id));
+    const viewer = ids(["task:read", "finding:read", "usage:read"]);
+    expect(viewer).toContain("tasks");
+    expect(viewer).toContain("findings");
+    expect(viewer).not.toContain("traffic");
+    expect(viewer).not.toContain("users");
+    expect(viewer).not.toContain("llm");
+    const all = sidebarItems.flatMap((g) => g.items.map((i) => i.id));
+    const adminPerms = sidebarItems.flatMap((g) => g.items.map((i) => i.requires ?? "")).filter(Boolean);
+    expect(ids(adminPerms)).toEqual(all);
   });
 });

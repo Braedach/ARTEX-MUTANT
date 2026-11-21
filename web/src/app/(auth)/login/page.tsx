@@ -18,6 +18,7 @@ import { auth } from "@/lib/auth";
 export default function LoginPage() {
   const router = useRouter();
   const t = useTranslations("auth");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -75,7 +76,7 @@ export default function LoginPage() {
     setError("");
     try {
       // The server sets the HttpOnly session cookie in this response; nothing to store.
-      await api.login("ARTEX", password);
+      await api.login(username.trim(), password);
       window.location.replace("/function/tasks");
     } catch {
       setError(t("login.errorCredential"));
@@ -115,7 +116,13 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="space-y-1.5">
               <Label htmlFor="username">{t("login.username")}</Label>
-              <Input id="username" value="ARTEX" readOnly className="bg-muted text-muted-foreground" />
+              <Input
+                id="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoFocus
+                autoComplete="username"
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password">{t("login.password")}</Label>
@@ -125,7 +132,6 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={t("login.passwordPlaceholder")}
-                autoFocus
                 autoComplete="current-password"
               />
             </div>

@@ -180,7 +180,8 @@
       "tasks": "Tasks",
       "tools": "Tools",
       "traffic": "Traffic",
-      "workspace": "Workspace"
+      "workspace": "Workspace",
+      "users": "Users"
     }
   },
   "notFound": {
@@ -2141,7 +2142,9 @@
     "errorRequired": "Enter your current password and new password",
     "errorMismatch": "The new passwords you entered do not match",
     "success": "Password changed",
-    "failed": "Failed to change password: {msg}"
+    "failed": "Failed to change password: {msg}",
+    "forcedTitle": "Choose a new password",
+    "forcedDescription": "You are signed in with a temporary password. Set your own password to continue."
   },
   "commands": {
     "title": "Tool execution",
@@ -3774,5 +3777,91 @@
       "name": "Vulnerability Retest",
       "description": "Launched manually from a finding's detail view; reads the original evidence and saves an independent retest conclusion."
     }
+  },
+  "usersPage": {
+    "roleHelpTitle": "What each role can do",
+    "title": "Users and roles",
+    "description": "Create accounts, set what each person may do, and review sign-in and change history. Roles are cumulative: each one includes everything the roles below it can do.",
+    "tabs": {
+      "users": "Users",
+      "log": "Security log"
+    },
+    "newUser": "New user",
+    "columns": {
+      "user": "User",
+      "role": "Role",
+      "status": "Status",
+      "lastLogin": "Last sign-in",
+      "actions": "Actions"
+    },
+    "status": {
+      "active": "Active",
+      "disabled": "Disabled",
+      "locked": "Locked",
+      "mustChange": "Must change password"
+    },
+    "never": "Never",
+    "you": "You",
+    "roles": {
+      "viewer": "Viewer",
+      "analyst": "Analyst",
+      "operator": "Operator",
+      "admin": "Admin"
+    },
+    "roleHelp": {
+      "viewer": "Read tasks, findings, reports and usage. No raw traffic, no changes.",
+      "analyst": "Viewer, plus triage findings, view raw evidence and export reports.",
+      "operator": "Analyst, plus create and run tasks, chat with agents and manage files.",
+      "admin": "Operator, plus users, LLM keys, settings, MCP and system administration."
+    },
+    "create": {
+      "title": "New user",
+      "username": "Username",
+      "usernameHelp": "3 to 32 characters: letters, digits, dot, underscore or dash.",
+      "displayName": "Display name",
+      "email": "Email",
+      "role": "Role",
+      "password": "Password (optional)",
+      "passwordHelp": "Leave empty to generate a temporary password. The user must change it at first sign-in.",
+      "submit": "Create user",
+      "submitting": "Creating…",
+      "created": "User created",
+      "cancel": "Cancel"
+    },
+    "actions": {
+      "disable": "Disable",
+      "enable": "Enable",
+      "reset": "Reset password",
+      "roleChanged": "Role updated",
+      "disabledDone": "User disabled",
+      "enabledDone": "User enabled"
+    },
+    "reset": {
+      "title": "Reset password",
+      "body": "Set a temporary password for {name}. Their current sessions end and they must choose a new password at next sign-in.",
+      "confirm": "Reset password",
+      "cancel": "Cancel"
+    },
+    "temp": {
+      "title": "Temporary password",
+      "body": "Give this password to {name}. It is shown once and cannot be retrieved later.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "close": "Done"
+    },
+    "log": {
+      "description": "Sign-ins, failed attempts, role and account changes, denied requests and every state-changing request, newest first.",
+      "filterAll": "All events",
+      "time": "Time",
+      "user": "User",
+      "event": "Event",
+      "detail": "Detail",
+      "ip": "From",
+      "empty": "No events yet.",
+      "refresh": "Refresh"
+    },
+    "loadFailed": "Could not load users: {msg}",
+    "failed": "Failed: {msg}",
+    "empty": "No users."
   }
 }

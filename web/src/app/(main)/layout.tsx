@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import * as React from "react";
 
 import { AppSidebar } from "@/app/(main)/_components/sidebar/app-sidebar";
+import { ChangePasswordDialog } from "@/app/(main)/_components/sidebar/change-password-dialog";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { auth } from "@/lib/auth";
 import { getClientCookie } from "@/lib/cookie.client";
@@ -33,11 +34,13 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
   // disables. No token → bounce to /login; render nothing until confirmed so no
   // protected UI (or its API calls) flashes for a logged-out visitor.
   const [authed, setAuthed] = React.useState(false);
+  const [mustChange, setMustChange] = React.useState(false);
   React.useEffect(() => {
     let cancelled = false;
     void auth.session().then(async (session) => {
       if (cancelled) return;
       if (session.authenticated) {
+        setMustChange(session.mustChangePassword === true);
         setAuthed(true);
         return;
       }
@@ -65,6 +68,10 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
   );
 
   if (!authed) return null;
+
+  // A temporary password (new account or admin reset) must be replaced before anything
+  // else is shown; the server refuses every other request until then.
+  if (mustChange) return <ChangePasswordDialog open forced onOpenChange={() => undefined} />;
 
   return (
     <SidebarProvider

@@ -15,6 +15,33 @@ release history (0.3.x and earlier) and contributor list are preserved verbatim 
 
 ## [Unreleased]
 
+### Multi-user accounts and roles (phase 1)
+
+- **Per-user accounts with four cumulative roles: viewer, analyst, operator, admin.** Until now there was one
+  shared admin password and every signed-in person could do everything, including running commands through the
+  agents. Design: [docs/multiuser-design.md](docs/multiuser-design.md).
+- **Deny-by-default permissions.** Every API route maps to a `resource:action` permission in one table
+  (`server/rbac.go`); a route with no entry is refused, and a test fails the build if any registered route is
+  missing from the table or the table lists a route that no longer exists. Role invariants are tested over the
+  real route set (viewers never change anything, analysts only triage findings, operators never reach
+  configuration, secrets, LLM keys, system or users).
+- **Immediate effect.** Sessions carry a user id and a token version; disabling a user, changing a role or
+  resetting a password ends the affected sessions at once. Browser sessions slide (12 hours idle, 7 days absolute).
+- **Account management** (admin): create users, change roles, disable or enable, reset to a temporary password
+  that must be changed at first sign-in, plus a security log of sign-ins, failures, denied requests, account
+  changes and every state-changing request with the acting user. The last enabled admin cannot be removed or
+  demoted, and nobody can change their own role.
+- **Upgrade is automatic.** The existing admin password becomes the first admin account (username `ARTEX`);
+  everyone signs in once more. The old password row is left in place, so rolling back to the previous image
+  still works. `ARTEX_ADMIN_PASSWORD` (and the new optional `ARTEX_ADMIN_USERNAME`) still bootstrap a fresh install.
+- **Web UI:** username field on the sign-in page, role-aware navigation, a Users page (accounts and security
+  log), a forced password-change screen, and a dashboard that tolerates sections a role cannot read.
+- **`reset-password.sh`** now resets a named account (`--login <name>`, default `ARTEX`), unlocks it and ends its
+  sessions.
+- Passwords set through the new paths must be at least 12 characters. Failed sign-ins lock an account for 15
+  minutes after 10 failures, on top of the existing per-client throttle.
+- New tables: `users`, `security_log`; new column `tasks.created_by`.
+
 ### Token efficiency (cost)
 
 - **Prompt caching was never switched on, and is now on by default for every provider.** Every agent call

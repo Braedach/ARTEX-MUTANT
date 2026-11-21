@@ -2,6 +2,9 @@
 # =============================================================================
 # ARTEX 관리자 비밀번호 재설정 스크립트
 #
+# 여러 사용자 계정을 지원합니다(users 테이블). 기본 계정은 ARTEX 이며 --login <이름> 으로 다른 계정을 지정합니다.
+# 재설정하면 그 계정의 세션이 모두 끝나고, 잠금과 비활성 상태가 풀리며, 비밀번호 변경 강제가 해제됩니다.
+# (계정이 하나도 없는 예전 설치에서는 이전과 같이 settings 의 auth.password_hash 를 씁니다.)
 # 로그인 사용자 이름은 ARTEX 로 고정입니다. 비밀번호는 bcrypt 해시로 데이터베이스 settings 테이블의
 # auth.password_hash 키에 저장됩니다. 이 스크립트는 데이터베이스에 접속한 뒤 pgcrypto 로 DB 안에서 bcrypt 해시를 생성해
 # 그 키에 다시 씁니다. 백엔드 로그인 검증(golang.org/x/crypto/bcrypt)과 완전히 호환됩니다.
@@ -35,6 +38,7 @@ CONFIG=""
 CONTAINER=""       # docker 모드의 postgres 서비스/컨테이너명(기본값 postgres)
 EXEC_KIND=""       # compose | docker(docker 모드에서 어떤 exec 를 쓸지. 비우면 자동)
 NEWPASS=""
+LOGIN_NAME="ARTEX"  # account whose password is reset (users table)
 ASSUME_YES=0
 
 die() { echo "오류: $*" >&2; exit 1; }
@@ -57,6 +61,7 @@ while [[ $# -gt 0 ]]; do
     -c|--container)   CONTAINER="${2:-}"; shift 2 ;;
     --exec)           EXEC_KIND="${2:-}"; shift 2 ;;
     -p|--new-password) NEWPASS="${2:-}"; shift 2 ;;
+    --login)          LOGIN_NAME="${2:-}"; shift 2 ;;
     -y|--yes)         ASSUME_YES=1; shift ;;
     -h|--help)        usage ;;
     *) die "알 수 없는 인자입니다: $1(-h 로 사용법 확인)" ;;
@@ -133,16 +138,30 @@ fi
 
 # 환경 변수로 비밀번호를 psql 에 전달합니다(\getenv 로 읽으며 argv/ps 에 들어가지 않습니다)
 export ARTEX_RESET_NEWPASS="$NEWPASS"
+export ARTEX_RESET_ACCOUNT="$LOGIN_NAME"
 
 # DB 안에서 bcrypt 를 생성해 upsert 합니다. 비밀번호는 :'newpw' 로 자동 이스케이프됩니다. CREATE EXTENSION 은 멱등이며,
 # 데이터베이스 역할에 확장 생성 권한이 없으면 여기서 오류가 납니다(안내는 아래 run 의 실패 분기 참조).
 SQL=$(cat <<SQL
 \\set ON_ERROR_STOP on
 \\getenv newpw ARTEX_RESET_NEWPASS
+\\getenv acct ARTEX_RESET_ACCOUNT
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
-INSERT INTO settings(key, value)
-VALUES ('$PASS_KEY', crypt(:'newpw', gen_salt('bf', $BCRYPT_COST)))
-ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+SELECT (SELECT count(*) FROM users) = 0 AS legacy_mode,
+       (SELECT count(*) FROM users WHERE lower(username) = lower(:'acct')) = 0 AS no_such_user \\gset
+\\if :legacy_mode
+  -- no accounts yet: the next start migrates this password into the first admin
+  INSERT INTO settings(key, value)
+  VALUES ('$PASS_KEY', crypt(:'newpw', gen_salt('bf', $BCRYPT_COST)))
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+\\elif :no_such_user
+  DO \$\$ BEGIN RAISE EXCEPTION 'no such account'; END \$\$;
+\\else
+  UPDATE users SET password_hash = crypt(:'newpw', gen_salt('bf', $BCRYPT_COST)),
+         must_change_pw = false, disabled = false, failed_logins = 0, locked_until = NULL,
+         token_version = token_version + 1
+   WHERE lower(username) = lower(:'acct');
+\\endif
 SQL
 )
 
@@ -219,10 +238,10 @@ else
   # -e 는 이름만 주고 값은 주지 않습니다 → 현재 환경에서 상속하므로 비밀번호가 docker 명령 argv 에 나타나지 않습니다.
   declare -a EXEC_CMD
   if [[ "$EXEC_KIND" == "compose" ]]; then
-    EXEC_CMD=(docker compose exec -T -e ARTEX_RESET_NEWPASS -e PGPASSWORD "$CONTAINER"
+    EXEC_CMD=(docker compose exec -T -e ARTEX_RESET_NEWPASS -e ARTEX_RESET_ACCOUNT -e PGPASSWORD "$CONTAINER"
               psql -U "$DUSER" -d "$DNAME" -v ON_ERROR_STOP=1 -q)
   else
-    EXEC_CMD=(docker exec -i -e ARTEX_RESET_NEWPASS -e PGPASSWORD "$CONTAINER"
+    EXEC_CMD=(docker exec -i -e ARTEX_RESET_NEWPASS -e ARTEX_RESET_ACCOUNT -e PGPASSWORD "$CONTAINER"
               psql -U "$DUSER" -d "$DNAME" -v ON_ERROR_STOP=1 -q)
   fi
 
@@ -231,6 +250,6 @@ else
   fi
 fi
 
-unset ARTEX_RESET_NEWPASS
+unset ARTEX_RESET_NEWPASS ARTEX_RESET_ACCOUNT
 echo "✓ ARTEX 관리자 비밀번호를 재설정했습니다. 사용자 이름 ARTEX + 새 비밀번호로 로그인하세요(서비스를 재시작할 필요가 없습니다)."
 echo "  기존에 발급된 로그인 세션(토큰)은 몇 초 안에 모두 무효화됩니다. 계정이 선점·유출된 뒤의 복구라면 커스텀 도구·MCP·LLM·알림 설정도 함께 점검하세요."

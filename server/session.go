@@ -45,7 +45,7 @@ func sessionCookie(r *http.Request, value string, maxAge int) *http.Cookie {
 
 // setSessionCookie issues the session cookie for a freshly signed token.
 func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
-	http.SetCookie(w, sessionCookie(r, token, int(jwtTTL.Seconds())))
+	http.SetCookie(w, sessionCookie(r, token, int(sessionAbsoluteTTL.Seconds())))
 }
 
 // clearSessionCookie expires the session cookie. Only the server can do this: the
@@ -61,18 +61,6 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 func (s *Server) authLogout(w http.ResponseWriter, r *http.Request) {
 	clearSessionCookie(w, r)
 	writeJSON(w, 200, map[string]any{"ok": true})
-}
-
-// GET /api/auth/session - tells the web UI whether it holds a valid session, since
-// it can no longer look at the token itself. Always 200: "not signed in" is an
-// ordinary answer, not an error.
-func (s *Server) authSession(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	if !s.verifyToken(extractToken(r)) {
-		writeJSON(w, 200, map[string]any{"authenticated": false})
-		return
-	}
-	writeJSON(w, 200, map[string]any{"authenticated": true, "username": "ARTEX"})
 }
 
 // csrfGuard refuses cross-origin state-changing requests that are authenticated only

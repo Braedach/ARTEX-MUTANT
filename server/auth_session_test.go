@@ -78,7 +78,7 @@ func TestSessionCookieAttributesOnLogin(t *testing.T) {
 	if c.Path != "/" {
 		t.Fatalf("Path = %q", c.Path)
 	}
-	if want := int(jwtTTL / time.Second); c.MaxAge != want {
+	if want := int(sessionAbsoluteTTL / time.Second); c.MaxAge != want {
 		t.Fatalf("MaxAge = %d, want %d", c.MaxAge, want)
 	}
 	if c.Secure {

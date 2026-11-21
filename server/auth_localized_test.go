@@ -20,7 +20,7 @@ func TestRequireAuthMessagesLocalized(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	h := s.requireAuth(next)
+	h := s.requireAuth(next, func(*http.Request) string { return "" })
 
 	cases := []struct {
 		name   string

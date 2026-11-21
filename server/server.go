@@ -118,16 +118,16 @@ type Server struct {
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key loaded from / generated into dataDir/jwt.key
 
-	// authMu guards the first-run setup token, the cached password hash (tokens
-	// are signed with a key derived from it — see auth.go signingKey) and the
-	// failed-attempt limiter. initMu serialises /api/auth/init check-then-set.
-	authMu         sync.Mutex
-	initMu         sync.Mutex
-	setupToken     string
-	passHash       string
-	passHashLoaded bool
-	passHashAt     time.Time
-	loginLimiter   *authLimiter
+	// authMu guards the first-run setup token and the failed-attempt limiter.
+	// initMu serialises /api/auth/init check-then-create. userMu guards the short-lived
+	// user cache used to authenticate requests (see authn.go).
+	authMu       sync.Mutex
+	initMu       sync.Mutex
+	setupToken   string
+	routes       *routeMux // set by Handler(); lets tests check the permission table against real routes
+	userMu       sync.Mutex
+	userCache    map[int64]cachedUser
+	loginLimiter *authLimiter
 
 	// concMu serializes concurrency-cap decisions (admission + reconcile) so a
 	// scheduler tick and an HTTP settings change / task creation can't both count
@@ -769,7 +769,8 @@ func (s *Server) chatAgentRef() *agent.ChatAgent {
 }
 
 func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
+	mux := newRouteMux()
+	s.routes = mux
 	s.registerSideRoutes(mux)
 
 	// Auth routes — exempt from JWT check (handled in requireAuth)
@@ -779,6 +780,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/change-password", s.authChangePassword)
 	mux.HandleFunc("POST /api/auth/logout", s.authLogout)
 	mux.HandleFunc("GET /api/auth/session", s.authSession)
+
+	mux.HandleFunc("GET /api/users", s.listUsers)
+	mux.HandleFunc("POST /api/users", s.createUser)
+	mux.HandleFunc("PATCH /api/users/{id}", s.updateUser)
+	mux.HandleFunc("POST /api/users/{id}/reset-password", s.resetUserPassword)
+	mux.HandleFunc("GET /api/security-log", s.listSecurityLog)
 
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/stats", s.stats)
@@ -1059,7 +1066,7 @@ func (s *Server) Handler() http.Handler {
 	// /api/* goes through CORS + JWT; everything else is served by the embedded
 	// frontend (public — auth is enforced client-side and on the API). With the
 	// no-embed build the webui handler just 404s (run `next dev` separately).
-	api := cors(csrfGuard(corsAllowedOrigins(), s.requireAuth(mux)))
+	api := cors(csrfGuard(corsAllowedOrigins(), s.requireAuth(mux, mux.patternFor)))
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
 	root.Handle("/", s.webuiHandler())
@@ -1688,6 +1695,13 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		}
 		writeErr(w, 500, err.Error())
 		return
+	}
+	if pr := principalFrom(r); pr != nil && pr.UserID > 0 && s.m.pg != nil {
+		if n, perr := strconv.ParseInt(t.ID, 10, 64); perr == nil {
+			if err := s.m.pg.SetTaskCreatedBy(n, pr.UserID); err != nil {
+				log.Printf("[auth] could not record the creator of task %s: %v", t.ID, err)
+			}
+		}
 	}
 	log.Printf("[task] 新建任务 #%s «%s» 目标: %s", t.ID, req.Description, req.Goal)
 	// 共享的建后流程(seed + 种子意图 + 后台目标分解 + engine.Run),与 spawn_task 复用同一段。

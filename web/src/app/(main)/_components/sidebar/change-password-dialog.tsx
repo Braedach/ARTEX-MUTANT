@@ -21,9 +21,12 @@ import { api } from "@/lib/api";
 export function ChangePasswordDialog({
   open,
   onOpenChange,
+  forced = false,
 }: {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
+  // A forced change (temporary password) cannot be dismissed; success reloads the app.
+  readonly forced?: boolean;
 }) {
   const t = useTranslations("changePasswordDialog");
   const [oldPassword, setOldPassword] = React.useState("");
@@ -57,6 +60,10 @@ export function ChangePasswordDialog({
         // 비밀번호가 바뀌면 이전 토큰은 서버에서 모두 무효화된다. 서버가 같은 응답에서 새
         // HttpOnly 세션 쿠키를 발급하므로 현재 세션만 이어지고, 다른 브라우저는 로그아웃된다.
         toast.success(t("success"));
+        if (forced) {
+          window.location.reload();
+          return;
+        }
         onOpenChange(false);
       })
       .catch((err) => toast.error(t("failed", { msg: (err as Error).message })))
@@ -64,12 +71,19 @@ export function ChangePasswordDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+    <Dialog open={open} onOpenChange={(next) => (forced ? undefined : onOpenChange(next))}>
+      <DialogContent
+        className="sm:max-w-md"
+        showCloseButton={!forced}
+        onEscapeKeyDown={(e) => forced && e.preventDefault()}
+        onInteractOutside={(e) => forced && e.preventDefault()}
+      >
         <form onSubmit={submit}>
           <DialogHeader>
-            <DialogTitle>{t("title")}</DialogTitle>
-            <DialogDescription>{t.rich("description", { b: (chunks) => <b>{chunks}</b> })}</DialogDescription>
+            <DialogTitle>{forced ? t("forcedTitle") : t("title")}</DialogTitle>
+            <DialogDescription>
+              {forced ? t("forcedDescription") : t.rich("description", { b: (chunks) => <b>{chunks}</b> })}
+            </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3 py-4">
             <div className="flex flex-col gap-1.5">
@@ -107,9 +121,11 @@ export function ChangePasswordDialog({
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-              {t("cancel")}
-            </Button>
+            {!forced && (
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+                {t("cancel")}
+              </Button>
+            )}
             <Button type="submit" disabled={saving}>
               {saving ? t("submitting") : t("submit")}
             </Button>
