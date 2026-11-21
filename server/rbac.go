@@ -55,6 +55,7 @@ const (
 	permSystemAdmin = "system:admin"
 	permUserManage  = "user:manage"
 	permAuditRead   = "audit:read"
+	permTokenManage = "token:manage"
 )
 
 // rolePerms lists the permissions each role adds on top of the roles below it.
@@ -62,7 +63,7 @@ var rolePerms = map[string][]string{
 	RoleViewer:   {permTaskRead, permFindingRead, permReportRead, permUsageRead},
 	RoleAnalyst:  {permEvidenceRead, permFindingTriage, permExportRun, permChatRead, permWorkspaceRead},
 	RoleOperator: {permTaskWrite, permChatUse, permWorkspaceWrite, permFindingWrite, permInterceptDecide, permLogsRead, permConfigRead},
-	RoleAdmin:    {permConfigWrite, permSecretsRead, permLLMAdmin, permSystemAdmin, permUserManage, permAuditRead},
+	RoleAdmin:    {permConfigWrite, permSecretsRead, permLLMAdmin, permSystemAdmin, permUserManage, permAuditRead, permTokenManage},
 }
 
 var roleOrder = []string{RoleViewer, RoleAnalyst, RoleOperator, RoleAdmin}
@@ -262,6 +263,7 @@ func init() {
 		"DELETE /api/traffic", "DELETE /api/traffic/all", "DELETE /api/traffic/hosts", "GET /api/audit", "GET /api/audit/verify")
 	grant(permUserManage, "GET /api/users", "POST /api/users", "PATCH /api/users/{id}", "POST /api/users/{id}/reset-password")
 	grant(permAuditRead, "GET /api/security-log")
+	grant(permTokenManage, "GET /api/api-tokens", "POST /api/api-tokens", "DELETE /api/api-tokens/{id}")
 }
 
 // routePermission returns the permission a route pattern requires and whether the

@@ -127,6 +127,8 @@ type Server struct {
 	routes       *routeMux // set by Handler(); lets tests check the permission table against real routes
 	userMu       sync.Mutex
 	userCache    map[int64]cachedUser
+	tokenCache   map[string]cachedToken
+	tokenTouched sync.Map // token id -> time of the last last_used_at write
 	loginLimiter *authLimiter
 
 	// concMu serializes concurrency-cap decisions (admission + reconcile) so a
@@ -786,6 +788,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/users/{id}", s.updateUser)
 	mux.HandleFunc("POST /api/users/{id}/reset-password", s.resetUserPassword)
 	mux.HandleFunc("GET /api/security-log", s.listSecurityLog)
+	mux.HandleFunc("GET /api/api-tokens", s.listAPITokens)
+	mux.HandleFunc("POST /api/api-tokens", s.createAPIToken)
+	mux.HandleFunc("DELETE /api/api-tokens/{id}", s.revokeAPIToken)
 
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/stats", s.stats)

@@ -37,6 +37,7 @@ func newAuthTestRig(t *testing.T) *authTestRig {
 	t.Cleanup(func() { _ = d.Close() })
 	clear := func() {
 		_, _ = d.Exec(`UPDATE tasks SET created_by=NULL`)
+		_, _ = d.Exec(`DELETE FROM api_tokens`)
 		_, _ = d.Exec(`DELETE FROM security_log`)
 		_, _ = d.Exec(`DELETE FROM users`)
 		_, _ = d.Exec(`DELETE FROM settings WHERE key = $1`, authPassKey)
@@ -64,6 +65,9 @@ func newAuthTestRig(t *testing.T) *authTestRig {
 	mux.HandleFunc("PATCH /api/users/{id}", s.updateUser)
 	mux.HandleFunc("POST /api/users/{id}/reset-password", s.resetUserPassword)
 	mux.HandleFunc("GET /api/security-log", s.listSecurityLog)
+	mux.HandleFunc("GET /api/api-tokens", s.listAPITokens)
+	mux.HandleFunc("POST /api/api-tokens", s.createAPIToken)
+	mux.HandleFunc("DELETE /api/api-tokens/{id}", s.revokeAPIToken)
 	mux.HandleFunc("GET /api/tasks", ok)           // task:read   (viewer)
 	mux.HandleFunc("GET /api/traffic", ok)         // evidence:read (analyst)
 	mux.HandleFunc("POST /api/tasks", ok)          // task:write  (operator)

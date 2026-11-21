@@ -25,7 +25,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSession } from "@/hooks/use-session";
 import { api } from "@/lib/api";
-import type { AccountRole, AccountUser, SecurityEvent } from "@/lib/types";
+import type { AccountRole, AccountUser, ApiToken, SecurityEvent } from "@/lib/types";
 
 const ROLES: AccountRole[] = ["viewer", "analyst", "operator", "admin"];
 const LOG_EVENTS = [
@@ -111,6 +111,7 @@ export default function UsersPage() {
       <Tabs defaultValue="users">
         <TabsList>
           <TabsTrigger value="users">{t("tabs.users")}</TabsTrigger>
+          <TabsTrigger value="tokens">{t("tabs.tokens")}</TabsTrigger>
           <TabsTrigger value="log">{t("tabs.log")}</TabsTrigger>
         </TabsList>
 
@@ -200,6 +201,10 @@ export default function UsersPage() {
               </CardDescription>
             </CardHeader>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="tokens">
+          <ApiTokens users={users} />
         </TabsContent>
 
         <TabsContent value="log">
@@ -505,5 +510,237 @@ function SecurityLog() {
         </Table>
       </CardContent>
     </Card>
+  );
+}
+
+const TOKEN_CAPS = ["viewer", "analyst", "operator"] as const;
+
+function tokenStatus(tok: ApiToken): "active" | "revoked" | "expired" {
+  if (tok.revoked_at) return "revoked";
+  return new Date(tok.expires_at).getTime() <= Date.now() ? "expired" : "active";
+}
+
+function ApiTokens({ users }: { readonly users: AccountUser[] }) {
+  const t = useTranslations("usersPage");
+  const [tokens, setTokens] = React.useState<ApiToken[]>([]);
+  const [loaded, setLoaded] = React.useState(false);
+  const [createOpen, setCreateOpen] = React.useState(false);
+  const [shown, setShown] = React.useState<{ name: string; token: string } | null>(null);
+
+  const load = React.useCallback(() => {
+    api
+      .apiTokens()
+      .then(setTokens)
+      .catch((err) => toast.error(t("loadFailed", { msg: (err as Error).message })))
+      .finally(() => setLoaded(true));
+  }, [t]);
+  React.useEffect(load, [load]);
+
+  function revoke(tok: ApiToken) {
+    api
+      .revokeApiToken(tok.id)
+      .then(() => {
+        toast.success(t("tokens.revoked"));
+        load();
+      })
+      .catch((err) => toast.error(t("failed", { msg: (err as Error).message })));
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-start justify-between gap-3">
+        <CardDescription className="max-w-2xl">{t("tokens.description")}</CardDescription>
+        <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <PlusIcon />
+          {t("tokens.new")}
+        </Button>
+      </CardHeader>
+      <CardContent className="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("tokens.columns.name")}</TableHead>
+              <TableHead>{t("tokens.columns.user")}</TableHead>
+              <TableHead>{t("tokens.columns.cap")}</TableHead>
+              <TableHead>{t("tokens.columns.prefix")}</TableHead>
+              <TableHead>{t("tokens.columns.lastUsed")}</TableHead>
+              <TableHead>{t("tokens.columns.expires")}</TableHead>
+              <TableHead>{t("tokens.columns.status")}</TableHead>
+              <TableHead className="text-right">{t("tokens.columns.actions")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loaded && tokens.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={8} className="text-center text-muted-foreground">
+                  {t("tokens.empty")}
+                </TableCell>
+              </TableRow>
+            )}
+            {tokens.map((tok) => {
+              const st = tokenStatus(tok);
+              return (
+                <TableRow key={tok.id}>
+                  <TableCell className="font-medium">{tok.name}</TableCell>
+                  <TableCell>{tok.username}</TableCell>
+                  <TableCell>{t(`roles.${tok.role_cap}`)}</TableCell>
+                  <TableCell className="font-mono text-xs">{tok.prefix}…</TableCell>
+                  <TableCell className="text-muted-foreground text-sm">
+                    {tok.last_used_at ? fmt(tok.last_used_at) : t("never")}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-sm">{fmt(tok.expires_at)}</TableCell>
+                  <TableCell>
+                    <Badge variant={st === "active" ? "default" : "secondary"}>{t(`tokens.status.${st}`)}</Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="outline" size="sm" disabled={st === "revoked"} onClick={() => revoke(tok)}>
+                      {t("tokens.revoke")}
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </CardContent>
+
+      <CreateTokenDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        users={users.filter((u) => !u.disabled)}
+        onCreated={(name, token) => {
+          load();
+          setShown({ name, token });
+        }}
+      />
+      <Dialog open={shown !== null} onOpenChange={(o) => !o && setShown(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t("tokens.shown.title")}</DialogTitle>
+            <DialogDescription>{t("tokens.shown.body", { name: shown?.name ?? "" })}</DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-2 rounded-md border bg-muted p-3">
+            <code className="flex-1 select-all break-all font-mono text-sm">{shown?.token}</code>
+            <CopyButton text={shown?.token} label={t("tokens.shown.copy")} successMessage={t("tokens.shown.copied")} />
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setShown(null)}>{t("tokens.shown.close")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
+function CreateTokenDialog({
+  open,
+  onOpenChange,
+  users,
+  onCreated,
+}: {
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly users: AccountUser[];
+  readonly onCreated: (accountName: string, token: string) => void;
+}) {
+  const t = useTranslations("usersPage");
+  const [userId, setUserId] = React.useState("");
+  const [name, setName] = React.useState("");
+  const [cap, setCap] = React.useState<string>("operator");
+  const [days, setDays] = React.useState("90");
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!open) {
+      setUserId("");
+      setName("");
+      setCap("operator");
+      setDays("90");
+    }
+  }, [open]);
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const user = users.find((u) => String(u.id) === userId);
+    if (!user) return;
+    setSaving(true);
+    api
+      .createApiToken({ user_id: user.id, name: name.trim(), role_cap: cap, expires_in_days: Number(days) || 90 })
+      .then((r) => {
+        onOpenChange(false);
+        onCreated(user.username, r.token);
+      })
+      .catch((err) => toast.error(t("failed", { msg: (err as Error).message })))
+      .finally(() => setSaving(false));
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <form onSubmit={submit}>
+          <DialogHeader>
+            <DialogTitle>{t("tokens.create.title")}</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 py-4">
+            <div className="flex flex-col gap-1.5">
+              <Label>{t("tokens.create.user")}</Label>
+              <Select value={userId} onValueChange={setUserId} disabled={saving}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {users.map((u) => (
+                    <SelectItem key={u.id} value={String(u.id)}>
+                      {u.username} ({t(`roles.${u.role}`)})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="tk-name">{t("tokens.create.name")}</Label>
+              <Input id="tk-name" value={name} disabled={saving} onChange={(e) => setName(e.target.value)} />
+              <p className="text-muted-foreground text-xs">{t("tokens.create.nameHelp")}</p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>{t("tokens.create.cap")}</Label>
+              <Select value={cap} onValueChange={setCap} disabled={saving}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TOKEN_CAPS.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {t(`roles.${r}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="tk-days">{t("tokens.create.expires")}</Label>
+              <Input
+                id="tk-days"
+                type="number"
+                min={1}
+                max={365}
+                value={days}
+                disabled={saving}
+                onChange={(e) => setDays(e.target.value)}
+              />
+              <p className="text-muted-foreground text-xs">{t("tokens.create.expiresHelp")}</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+              {t("tokens.create.cancel")}
+            </Button>
+            <Button type="submit" disabled={saving || !userId || name.trim() === ""}>
+              {saving ? t("tokens.create.submitting") : t("tokens.create.submit")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

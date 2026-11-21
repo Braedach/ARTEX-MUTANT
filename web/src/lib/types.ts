@@ -1646,3 +1646,16 @@ export interface SecurityEvent {
   detail: string;
   ip: string;
 }
+
+export interface ApiToken {
+  id: number;
+  user_id: number;
+  username?: string;
+  name: string;
+  prefix: string;
+  role_cap: "viewer" | "analyst" | "operator";
+  expires_at: string;
+  last_used_at?: string;
+  revoked_at?: string;
+  created_at: string;
+}

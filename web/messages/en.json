@@ -3784,7 +3784,8 @@
     "description": "Create accounts, set what each person may do, and review sign-in and change history. Roles are cumulative: each one includes everything the roles below it can do.",
     "tabs": {
       "users": "Users",
-      "log": "Security log"
+      "log": "Security log",
+      "tokens": "API tokens"
     },
     "newUser": "New user",
     "columns": {
@@ -3862,6 +3863,47 @@
     },
     "loadFailed": "Could not load users: {msg}",
     "failed": "Failed: {msg}",
-    "empty": "No users."
+    "empty": "No users.",
+    "tokens": {
+      "description": "API tokens let a script or an assistant act as one account without its password. A token never exceeds the role you cap it at (never admin), cannot manage users or tokens, and can be revoked at any time. The token is shown once.",
+      "new": "New token",
+      "columns": {
+        "name": "Name",
+        "user": "Account",
+        "cap": "Role cap",
+        "prefix": "Token",
+        "lastUsed": "Last used",
+        "expires": "Expires",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "status": {
+        "active": "Active",
+        "revoked": "Revoked",
+        "expired": "Expired"
+      },
+      "revoke": "Revoke",
+      "revoked": "Token revoked",
+      "empty": "No API tokens.",
+      "create": {
+        "title": "New API token",
+        "user": "Account",
+        "name": "Name",
+        "nameHelp": "What this token is for, for example \"scan monitor\".",
+        "cap": "Role cap",
+        "expires": "Expires in (days)",
+        "expiresHelp": "1 to 365. The default is 90.",
+        "submit": "Create token",
+        "submitting": "Creating…",
+        "cancel": "Cancel"
+      },
+      "shown": {
+        "title": "Copy your token now",
+        "body": "This token acts as {name}. It is shown once and cannot be retrieved later; if you lose it, revoke it and create another.",
+        "copy": "Copy",
+        "copied": "Copied",
+        "close": "Done"
+      }
+    }
   }
 }
